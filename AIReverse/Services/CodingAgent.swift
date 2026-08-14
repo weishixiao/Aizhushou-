@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// 工具卡片状态
 enum ToolCallStatus: Equatable {
@@ -33,6 +34,7 @@ final class CodingAgent: ObservableObject {
 
     private let client = LLMClient()
     private var isCancelled = false
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
     private let maxToolIterations = 15
     private let conversationFileName = "conversation.json"
@@ -56,6 +58,12 @@ final class CodingAgent: ObservableObject {
         let text = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isWorking else { return }
         isCancelled = false
+        let taskID = await MainActor.run { beginBackgroundTask() }
+        defer {
+            Task { @MainActor in
+                endBackgroundTask(taskID)
+            }
+        }
 
         await MainActor.run {
             isWorking = true
@@ -155,6 +163,9 @@ final class CodingAgent: ObservableObject {
 
     func cancel() {
         isCancelled = true
+        Task { @MainActor in
+            endBackgroundTask(backgroundTaskID)
+        }
     }
 
     /// 切换工作区根目录
@@ -241,6 +252,29 @@ final class CodingAgent: ObservableObject {
     private func conversationURL() -> URL? {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
             .appendingPathComponent(conversationFileName)
+    }
+
+    @MainActor
+    private func beginBackgroundTask() -> UIBackgroundTaskIdentifier {
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        }
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "AIReverseChat") { [weak self] in
+            guard let self else { return }
+            self.isCancelled = true
+            self.stageText = "后台执行超时"
+            self.endBackgroundTask(self.backgroundTaskID)
+        }
+        return backgroundTaskID
+    }
+
+    @MainActor
+    private func endBackgroundTask(_ taskID: UIBackgroundTaskIdentifier) {
+        guard taskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(taskID)
+        if backgroundTaskID == taskID {
+            backgroundTaskID = .invalid
+        }
     }
 }
 

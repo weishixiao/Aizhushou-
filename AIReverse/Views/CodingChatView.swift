@@ -16,7 +16,7 @@ struct CodingChatView: View {
     @State private var uploadError: String?
 
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
-    private let packageExtensions: Set<String> = ["ipa", "tipa", "deb"]
+    private let packageExtensions: Set<String> = ["ipa", "tipa", "deb", "dylib", "apk"]
 
     init(workspace: WorkspaceManager) {
         _agent = StateObject(wrappedValue: CodingAgent(workspace: workspace))
@@ -239,12 +239,12 @@ struct CodingChatView: View {
                 .buttonStyle(.plain)
 
                 if #available(iOS 16.0, *) {
-                    TextField("发送消息，或上传 ipa / tipa / deb...", text: $inputText, axis: .vertical)
+                    TextField("发送消息，或上传 ipa / tipa / deb / dylib / apk...", text: $inputText, axis: .vertical)
                         .lineLimit(1...5)
                         .font(.system(size: 15))
                         .padding(.vertical, 10)
                 } else {
-                    TextField("发送消息，或上传 ipa / tipa / deb...", text: $inputText)
+                    TextField("发送消息，或上传 ipa / tipa / deb / dylib / apk...", text: $inputText)
                         .font(.system(size: 15))
                         .padding(.vertical, 10)
                 }
@@ -313,7 +313,7 @@ struct CodingChatView: View {
 
     private func seedWelcome() {
         let text = """
-        你好，我是 AIReverse。你可以直接发消息，也可以点击输入框左侧附件上传 ipa、tipa 或 deb 文件。
+        你好，我是 AIReverse。你可以直接发消息，也可以点击输入框左侧附件上传 ipa、tipa、deb、dylib 或 apk 文件。
         """
         agent.appendLocalMessage(role: .assistant, content: text)
     }
@@ -321,7 +321,7 @@ struct CodingChatView: View {
     private func importPackageFile(_ url: URL) {
         let ext = url.pathExtension.lowercased()
         guard packageExtensions.contains(ext) else {
-            uploadError = "仅支持上传 .ipa、.tipa、.deb 文件"
+            uploadError = "仅支持上传 .ipa、.tipa、.deb、.dylib、.apk 文件"
             uploadedFileName = nil
             return
         }

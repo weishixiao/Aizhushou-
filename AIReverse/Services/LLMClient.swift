@@ -44,6 +44,8 @@ final class LLMClient {
     init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 180
+        config.timeoutIntervalForResource = 600
+        config.waitsForConnectivity = true
         session = URLSession(configuration: config)
     }
 
