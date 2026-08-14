@@ -65,7 +65,7 @@ struct ModelSettingsView: View {
         }
         .alert(isPresented: $showTestAlert) {
             Alert(
-                title: Text(testResult?.hasPrefix("✅") == true ? "测试成功" : "测试结果"),
+                title: Text(testResult?.hasPrefix("连接成功") == true ? "测试成功" : "测试结果"),
                 message: Text(testResult ?? ""),
                 dismissButton: .default(Text("好"))
             )
@@ -91,14 +91,14 @@ struct ModelSettingsView: View {
                 let reply = try await client.chat(model: model, messages: messages)
                 let preview = String(reply.prefix(60))
                 await MainActor.run {
-                    testResult = "✅ 连接成功，模型可用\n\n回复：\(preview)"
+                    testResult = "连接成功，模型可用\n\n回复：\(preview)"
                     isTesting = false
                     testingModel = nil
                     showTestAlert = true
                 }
             } catch {
                 await MainActor.run {
-                    testResult = "❌ 连接失败：\n\(error.localizedDescription)"
+                    testResult = "连接失败：\n\(error.localizedDescription)"
                     isTesting = false
                     testingModel = nil
                     showTestAlert = true
@@ -234,7 +234,7 @@ struct ModelEditView: View {
             }
             .alert(isPresented: $showTestAlert) {
                 Alert(
-                    title: Text(testResult?.hasPrefix("✅") == true ? "测试成功" : "测试结果"),
+                    title: Text(testResult?.hasPrefix("连接成功") == true ? "测试成功" : "测试结果"),
                     message: Text(testResult ?? ""),
                     dismissButton: .default(Text("好"))
                 )
@@ -261,13 +261,13 @@ struct ModelEditView: View {
                 let reply = try await client.chat(model: cfg, messages: messages)
                 let preview = String(reply.prefix(60))
                 await MainActor.run {
-                    testResult = "✅ 连接成功，模型可用\n\n回复：\(preview)"
+                    testResult = "连接成功，模型可用\n\n回复：\(preview)"
                     isTesting = false
                     showTestAlert = true
                 }
             } catch {
                 await MainActor.run {
-                    testResult = "❌ 连接失败：\n\(error.localizedDescription)"
+                    testResult = "连接失败：\n\(error.localizedDescription)"
                     isTesting = false
                     showTestAlert = true
                 }

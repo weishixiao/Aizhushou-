@@ -24,6 +24,7 @@ struct ArchInfo {
 struct SegmentInfo {
     var name: String = ""
     var vmAddr: UInt64 = 0
+    var vmSize: UInt64 = 0
     var fileOffset: UInt64 = 0
     var fileSize: UInt64 = 0
 }

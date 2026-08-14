@@ -17,7 +17,10 @@ final class ARM64Disassembler {
     private func readU32(_ index: Int) -> UInt32? {
         let off = index * 4
         guard off >= 0, off + 4 <= code.count else { return nil }
-        return code.withUnsafeBytes { $0.load(fromByteOffset: off, as: UInt32.self) }
+        return UInt32(code[off])
+            | (UInt32(code[off + 1]) << 8)
+            | (UInt32(code[off + 2]) << 16)
+            | (UInt32(code[off + 3]) << 24)
     }
 
     func disassemble(maxInstructions: Int = 2000) -> [DisasmLine] {

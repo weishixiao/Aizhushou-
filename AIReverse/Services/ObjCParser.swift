@@ -17,7 +17,8 @@ final class ObjCParser {
     /// 将 vmaddr 转换为文件偏移；失败返回 nil
     private func fileOffset(for vmaddr: UInt64) -> Int? {
         for seg in segments {
-            if vmaddr >= seg.vmAddr && vmaddr < seg.vmAddr + seg.fileSize {
+            let vmSize = max(seg.vmSize, seg.fileSize)
+            if vmaddr >= seg.vmAddr && vmaddr < seg.vmAddr + vmSize {
                 return Int(vmaddr - seg.vmAddr + seg.fileOffset)
             }
         }
@@ -26,14 +27,20 @@ final class ObjCParser {
 
     private func readU32(_ offset: Int) -> UInt32? {
         guard offset >= 0, offset + 4 <= data.count else { return nil }
-        var v = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self) }
+        var v = UInt32(data[offset])
+            | (UInt32(data[offset + 1]) << 8)
+            | (UInt32(data[offset + 2]) << 16)
+            | (UInt32(data[offset + 3]) << 24)
         if swapped { v = CFSwapInt32(v) }
         return v
     }
 
     private func readU64(_ offset: Int) -> UInt64? {
         guard offset >= 0, offset + 8 <= data.count else { return nil }
-        var v = data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt64.self) }
+        var v: UInt64 = 0
+        for i in 0..<8 {
+            v |= UInt64(data[offset + i]) << (i * 8)
+        }
         if swapped { v = CFSwapInt64(v) }
         return v
     }
@@ -85,23 +92,20 @@ final class ObjCParser {
     /// 完整解析 Load Commands 中的 section_64 表，定位 __objc_classlist。
     private func findObjCClassListSection() -> (fileOffset: Int, size: UInt64)? {
         guard data.count >= 4 else { return nil }
-        let magicRaw = data.withUnsafeBytes { $0.load(as: UInt32.self) }
-        let isSwapped = (magicRaw == 0xCFFAEDFE) // MH_CIGAM_64
-        func host(_ v: UInt32) -> UInt32 { isSwapped ? CFSwapInt32(v) : v }
-
         var offset = 0
         if data.count >= 8 {
-            let magic = data.withUnsafeBytes { $0.load(as: UInt32.self) }
+            let magic = readU32Raw(0) ?? 0
             if magic == 0xCAFEBABE || magic == 0xBEBAFECA {
                 // fat：找到 arm64 slice，重新定位
                 let fatSwapped = magic == 0xBEBAFECA
-                let count = Int(host(readU32Raw(4) ?? 0))
+                func fatHost(_ v: UInt32) -> UInt32 { fatSwapped ? CFSwapInt32(v) : v }
+                let count = Int(fatHost(readU32Raw(4) ?? 0))
                 for i in 0..<count {
                     let base = 8 + i * 20
                     let cpu = readU32Raw(base + 0) ?? 0
-                    let c = fatSwapped ? CFSwapInt32(cpu) : cpu
+                    let c = fatHost(cpu)
                     if c == 0x0100000C {
-                        offset = Int(readU32Raw(base + 8) ?? 0)
+                        offset = Int(fatHost(readU32Raw(base + 8) ?? 0))
                         break
                     }
                 }
@@ -109,6 +113,10 @@ final class ObjCParser {
         }
 
         guard offset + 32 <= data.count else { return nil }
+        let sliceMagic = readU32Raw(offset) ?? 0
+        let isSwapped = (sliceMagic == 0xCFFAEDFE) // MH_CIGAM_64
+        func host(_ v: UInt32) -> UInt32 { isSwapped ? CFSwapInt32(v) : v }
+        func host64(_ v: UInt64) -> UInt64 { isSwapped ? CFSwapInt64(v) : v }
         let ncmds = Int(host(readU32Raw(offset + 16) ?? 0))
         var cursor = offset + 32
 
@@ -121,22 +129,17 @@ final class ObjCParser {
             if cmd == 0x19 { // LC_SEGMENT_64
                 var segCursor = cursor + 72 // segment_command_64 头（8+16+8*4+8*4 = 72）
                 let nsects = Int(host(readU32Raw(cursor + 64) ?? 0))
-                let segFileOff = readU64Raw(cursor + 40) ?? 0
-                let segVMAddr = readU64Raw(cursor + 24) ?? 0
                 for _ in 0..<nsects {
                     guard segCursor + 80 <= data.count else { break }
                     // section_64: sectname[16] segname[16] addr(8) size(8) offset(4) ... 
                     let sectName = asciiString(at: segCursor, len: 16)
                     if sectName == "__objc_classlist" {
-                        let addr = readU64Raw(segCursor + 32) ?? 0
-                        let size = readU64Raw(segCursor + 40) ?? 0
-                        let fileOff = Int(readU32Raw(segCursor + 48) ?? 0)
+                        let size = host64(readU64Raw(segCursor + 40) ?? 0)
+                        let fileOff = Int(host(readU32Raw(segCursor + 48) ?? 0))
                         return (fileOff, size)
                     }
                     segCursor += 80
                 }
-                _ = segFileOff
-                _ = segVMAddr
             }
             cursor += cmdsize
         }
@@ -145,12 +148,19 @@ final class ObjCParser {
 
     private func readU32Raw(_ offset: Int) -> UInt32? {
         guard offset >= 0, offset + 4 <= data.count else { return nil }
-        return data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self) }
+        return UInt32(data[offset])
+            | (UInt32(data[offset + 1]) << 8)
+            | (UInt32(data[offset + 2]) << 16)
+            | (UInt32(data[offset + 3]) << 24)
     }
 
     private func readU64Raw(_ offset: Int) -> UInt64? {
         guard offset >= 0, offset + 8 <= data.count else { return nil }
-        return data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt64.self) }
+        var value: UInt64 = 0
+        for i in 0..<8 {
+            value |= UInt64(data[offset + i]) << (i * 8)
+        }
+        return value
     }
 
     private func asciiString(at offset: Int, len: Int) -> String {

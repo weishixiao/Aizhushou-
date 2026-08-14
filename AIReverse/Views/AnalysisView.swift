@@ -282,7 +282,19 @@ struct AnalysisView: View {
                     .font(.headline)
                     .padding(.top, 8)
                 ForEach(Array(result.macho.segments.enumerated()), id: \.offset) { _, seg in
-                    infoRow(seg.name, String(format: "vmaddr 0x%08llX  fileoff 0x%08llX  size %llu", seg.vmAddr, seg.fileOffset, seg.fileSize))
+                    infoRow(seg.name, String(format: "vmaddr 0x%08llX  vmsize %llu  fileoff 0x%08llX  filesize %llu", seg.vmAddr, seg.vmSize, seg.fileOffset, seg.fileSize))
+                }
+            }
+
+            if !result.macho.loadCommands.isEmpty {
+                Text("Load Commands")
+                    .font(.headline)
+                    .padding(.top, 8)
+                ForEach(Array(result.macho.loadCommands.prefix(80).enumerated()), id: \.offset) { _, command in
+                    Text(command)
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -297,7 +309,11 @@ struct AnalysisView: View {
         lines.append("ObjC 类: \(result.macho.objcClassCount)")
         lines.append("字符串: \(result.macho.strings.count)")
         for seg in result.macho.segments {
-            lines.append("\(seg.name): vmaddr 0x\(String(format: "%08llX", seg.vmAddr)) fileoff 0x\(String(format: "%08llX", seg.fileOffset)) size \(seg.fileSize)")
+            lines.append("\(seg.name): vmaddr 0x\(String(format: "%08llX", seg.vmAddr)) vmsize \(seg.vmSize) fileoff 0x\(String(format: "%08llX", seg.fileOffset)) filesize \(seg.fileSize)")
+        }
+        if !result.macho.loadCommands.isEmpty {
+            lines.append("\nLoad Commands:")
+            lines.append(contentsOf: result.macho.loadCommands.prefix(80))
         }
         return lines.joined(separator: "\n")
     }

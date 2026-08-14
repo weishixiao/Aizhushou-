@@ -26,8 +26,8 @@ final class ZipReader {
         self.data = data
     }
 
-    /// 读取全部条目元数据（含解压后的数据）
-    func readEntries() throws -> [Entry] {
+    /// 读取全部条目元数据；按需加载数据可避免导入大型 IPA 时解压全部资源。
+    func readEntries(loadData: Bool = true) throws -> [Entry] {
         guard let eocd = findEOCD() else { throw ZipError.notZip }
         let cdOffset = Int(readU32(at: eocd + 16) ?? 0)
         let cdSize = Int(readU32(at: eocd + 12) ?? 0)
@@ -58,7 +58,9 @@ final class ZipReader {
                               uncompressedSize: uncompressedSize,
                               localHeaderOffset: localOffset,
                               method: method)
-            entry.data = extractData(for: entry)
+            if loadData {
+                entry.data = extractData(for: entry)
+            }
             entries.append(entry)
 
             cursor = nameStart + nameLen + extraLen + commentLen
@@ -68,8 +70,14 @@ final class ZipReader {
 
     /// 读取某个条目
     func entry(named name: String) -> Entry? {
-        guard let entries = try? readEntries() else { return nil }
-        return entries.first { $0.name == name || $0.name.hasSuffix(name) }
+        guard let entries = try? readEntries(loadData: false),
+              var entry = entries.first(where: { $0.name == name || $0.name.hasSuffix(name) }) else { return nil }
+        entry.data = extractData(for: entry)
+        return entry
+    }
+
+    func readData(for entry: Entry) -> Data? {
+        entry.data ?? extractData(for: entry)
     }
 
     private func extractData(for entry: Entry) -> Data? {
@@ -159,11 +167,14 @@ final class ZipReader {
 
     private func readU16(at offset: Int) -> UInt16? {
         guard offset >= 0, offset + 2 <= data.count else { return nil }
-        return data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt16.self) }
+        return UInt16(data[offset]) | (UInt16(data[offset + 1]) << 8)
     }
 
     private func readU32(at offset: Int) -> UInt32? {
         guard offset >= 0, offset + 4 <= data.count else { return nil }
-        return data.withUnsafeBytes { $0.load(fromByteOffset: offset, as: UInt32.self) }
+        return UInt32(data[offset])
+            | (UInt32(data[offset + 1]) << 8)
+            | (UInt32(data[offset + 2]) << 16)
+            | (UInt32(data[offset + 3]) << 24)
     }
 }

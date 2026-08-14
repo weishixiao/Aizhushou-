@@ -63,6 +63,10 @@ struct ChatView: View {
             if messages.isEmpty {
                 seedWelcomeMessage()
             }
+            includeContext = analysisStore.activeResult != nil
+        }
+        .onChange(of: analysisStore.activeResult?.url) { url in
+            includeContext = url != nil
         }
     }
 
@@ -79,6 +83,9 @@ struct ChatView: View {
                     .lineLimit(1)
                     .foregroundColor(.secondary)
             }
+            Toggle("", isOn: $includeContext)
+                .labelsHidden()
+                .disabled(analysisStore.activeResult == nil)
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
@@ -134,20 +141,9 @@ struct ChatView: View {
             var conversation = messages
 
             // 附加系统提示：包含分析上下文
-            var systemPrompt = "你是专业的 iOS 逆向分析助手。使用简体中文回答，分析要专业、分点、引用具体地址。"
+            var systemPrompt = "你是专业的 iOS 逆向分析助手。使用简体中文回答，分析要专业、分点、引用具体地址、类名、方法名、字符串或符号名。优先识别网络接口、鉴权逻辑、加密解密、越狱检测、反调试、证书校验和敏感数据存储。"
             if includeContext, let result = analysisStore.activeResult {
-                systemPrompt += "\n\n=== 当前分析的文件 ===\n\(result.summary)\n"
-                if !result.macho.strings.isEmpty {
-                    systemPrompt += "\n=== 提取的字符串（前 100 条）===\n" + result.macho.strings.prefix(100).joined(separator: "\n")
-                }
-                if !result.objcClasses.isEmpty {
-                    systemPrompt += "\n=== ObjC 类与关键方法（前 50 个类）===\n" + summarizeClasses(result.objcClasses)
-                }
-                if !result.disassembly.isEmpty {
-                    systemPrompt += "\n=== __text 反汇编片段（前 300 行）===\n" + result.disassembly.prefix(300).map {
-                        String(format: "0x%08llX: %@", $0.address, $0.text)
-                    }.joined(separator: "\n")
-                }
+                systemPrompt += "\n\n=== 当前分析上下文 ===\n\(result.contextText)"
             }
             conversation.insert(ChatMessage(role: .system, content: systemPrompt), at: 0)
 
@@ -162,20 +158,10 @@ struct ChatView: View {
                 messages.append(ChatMessage(role: .assistant, content: reply))
             } catch {
                 errorMessage = error.localizedDescription
-                messages.append(ChatMessage(role: .assistant, content: "⚠️ 请求失败：\(error.localizedDescription)"))
+                messages.append(ChatMessage(role: .assistant, content: "请求失败：\(error.localizedDescription)"))
             }
             isSending = false
         }
-    }
-
-    private func summarizeClasses(_ classes: [ObjCClassInfo]) -> String {
-        classes.prefix(50).map { cls in
-            var line = "\(cls.name)"
-            if !cls.superclassName.isEmpty { line += " : \(cls.superclassName)" }
-            let methods = cls.methods.prefix(15).map { $0.selector }.joined(separator: ", ")
-            if !methods.isEmpty { line += "  [\(methods)]" }
-            return line
-        }.joined(separator: "\n")
     }
 }
 

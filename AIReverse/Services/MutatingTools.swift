@@ -37,7 +37,7 @@ final class WriteFileTool: CodingTool {
 /// 通过 GitHub Git Data API 顺序执行 blob -> tree -> commit -> ref。
 final class GitCommitTool: CodingTool {
     var name: String { "git_commit" }
-    var description: String { "提交工作区变更到远端仓库当前分支。会扫描本地快照差异：新增/修改的文件通过 files 参数提供内容，删除通过 deleted_paths 提供。提交后更新本地基线快照。属于修改类操作。" }
+    var description: String { "提交工作区新增或修改的文本文件到远端仓库当前分支。提交后更新本地基线快照。属于修改类操作。" }
     var isMutating: Bool { true }
 
     var parameters: [String: Any] {
@@ -50,11 +50,6 @@ final class GitCommitTool: CodingTool {
                     "type": "object",
                     "description": "要提交写入的文件内容映射：{相对路径: 新内容}",
                     "additionalProperties": ["type": "string"]
-                ],
-                "deleted_paths": [
-                    "type": "array",
-                    "description": "要删除的文件相对路径列表",
-                    "items": ["type": "string"]
                 ]
             ],
             "required": ["message"]
@@ -79,7 +74,12 @@ final class GitCommitTool: CodingTool {
                 }
             }
         }
-        let deleted = ToolArgs.stringArray(arguments, "deleted_paths") ?? []
+        if let deleted = ToolArgs.stringArray(arguments, "deleted_paths"), !deleted.isEmpty {
+            return ToolResult(success: false, output: "当前版本不支持 AI 提交删除文件。请人工确认删除后再提交。")
+        }
+        if arguments.keys.contains(where: { $0.hasPrefix("delete:") }) {
+            return ToolResult(success: false, output: "当前版本不支持 AI 提交删除文件。请人工确认删除后再提交。")
+        }
 
         // 若未显式提供 files，尝试从本地快照差异自动收集已修改文本文件
         var effectiveFiles = files
@@ -103,36 +103,23 @@ final class GitCommitTool: CodingTool {
                     }
                 }
             }
-            var effectiveDeleted = deleted
-            for change in changes where change.type == .deleted {
-                if !effectiveDeleted.contains(change.path) {
-                    effectiveDeleted.append(change.path)
-                }
-            }
-            if effectiveFiles.isEmpty && effectiveDeleted.isEmpty {
+            if effectiveFiles.isEmpty {
                 return ToolResult(success: false, output: "没有需要提交的变更")
             }
             return try await performCommit(
                 workspace: workspace, github: github, repoConfig: repoConfig,
                 branch: branch, message: message,
-                files: effectiveFiles, deleted: effectiveDeleted
+                files: effectiveFiles
             )
         }
 
-        var effectiveDeleted = deleted
-        // 用户显式删除路径也纳入
-        for key in arguments.keys where key.hasPrefix("delete:") {
-            if let p = arguments[key] as? String {
-                effectiveDeleted.append(p)
-            }
-        }
-        if effectiveFiles.isEmpty && effectiveDeleted.isEmpty {
+        if effectiveFiles.isEmpty {
             return ToolResult(success: false, output: "没有需要提交的文件")
         }
         return try await performCommit(
             workspace: workspace, github: github, repoConfig: repoConfig,
             branch: branch, message: message,
-            files: effectiveFiles, deleted: effectiveDeleted
+            files: effectiveFiles
         )
     }
 
@@ -142,8 +129,7 @@ final class GitCommitTool: CodingTool {
         repoConfig: GitRepoConfig,
         branch: String,
         message: String,
-        files: [String: String],
-        deleted: [String]
+        files: [String: String]
     ) async throws -> ToolResult {
         do {
             let sha = try await github.commitFiles(
@@ -152,7 +138,7 @@ final class GitCommitTool: CodingTool {
                 branch: branch,
                 message: message,
                 files: files,
-                deletedPaths: deleted
+                deletedPaths: []
             )
             // 提交成功后更新本地基线快照
             let tracker = GitStatusTracker()
@@ -163,9 +149,6 @@ final class GitCommitTool: CodingTool {
             var summary = "提交成功：\(branch) \(String(sha.prefix(7)))"
             if !files.isEmpty {
                 summary += "写入/修改：\n" + files.keys.sorted().map { "  + \($0)" }.joined(separator: "\n") + "\n"
-            }
-            if !deleted.isEmpty {
-                summary += "删除：\n" + deleted.sorted().map { "  - \($0)" }.joined(separator: "\n")
             }
             return ToolResult(success: true, output: summary)
         } catch {

@@ -124,7 +124,7 @@ final class CodingAgent: ObservableObject {
             if finalText == nil && !isCancelled {
                 // 达到迭代上限仍无文本，给出提示
                 await MainActor.run {
-                    messages.append(ChatMessage(role: .assistant, content: "⚠️ 工具调用次数过多，已停止。请简化指令或重新提问。"))
+                    messages.append(ChatMessage(role: .assistant, content: "工具调用次数过多，已停止。请简化指令或重新提问。"))
                 }
             }
         } catch {

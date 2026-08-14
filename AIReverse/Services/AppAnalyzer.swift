@@ -89,38 +89,42 @@ final class AppAnalyzer {
         guard let zipData = try? Data(contentsOf: url) else { return nil }
         let reader = ZipReader(data: zipData)
 
-        guard let entries = try? reader.readEntries() else { return nil }
+        guard let entries = try? reader.readEntries(loadData: false) else { return nil }
 
         // 收集所有 Payload/*.app/ 的直接子文件（parts.count == 3，不深入子目录）
         // 形如：Payload/Foo.app/Foo
-        var directChildren: [(name: String, data: Data)] = []
+        var directChildren: [(name: String, entry: ZipReader.Entry)] = []
         var appNames: [String] = []
 
         for e in entries where !e.name.hasSuffix("/") && e.name.contains(".app/") {
             let parts = e.name.split(separator: "/")
             guard parts.count == 3 else { continue }
-            guard let d = e.data else { continue }
             let appName = parts[1].replacingOccurrences(of: ".app", with: "")
             if !appNames.contains(appName) {
                 appNames.append(appName)
             }
-            directChildren.append((String(parts[2]), d))
+            directChildren.append((String(parts[2]), e))
         }
 
         // 1) 优先：与 .app 同名的可执行文件（标准 iOS 布局 Payload/Foo.app/Foo）
         for appName in appNames {
             if let hit = directChildren.first(where: { $0.name == appName }) {
-                return (hit.data, hit.name)
+                guard let data = reader.readData(for: hit.entry) else { continue }
+                return (data, hit.name)
             }
         }
         // 2) 其次：文件头是 Mach-O 魔数的直接子文件
-        if let hit = directChildren.first(where: { isMachOMagic($0.data) }) {
-            return (hit.data, hit.name)
+        for hit in directChildren {
+            guard let data = reader.readData(for: hit.entry) else { continue }
+            if isMachOMagic(data) {
+                return (data, hit.name)
+            }
         }
         // 3) 兜底：无扩展名且体积最大的直接子文件
         let noExt = directChildren.filter { !$0.name.contains(".") }
-        if let hit = noExt.max(by: { $0.data.count < $1.data.count }) {
-            return (hit.data, hit.name)
+        if let hit = noExt.max(by: { $0.entry.uncompressedSize < $1.entry.uncompressedSize }),
+           let data = reader.readData(for: hit.entry) {
+            return (data, hit.name)
         }
         return nil
     }

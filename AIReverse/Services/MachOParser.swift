@@ -34,16 +34,12 @@ final class MachOParser {
         self.data = data
     }
 
-    private func read<T>(_ type: T.Type, at offset: Int) -> T? {
-        guard offset >= 0, offset + MemoryLayout<T>.size <= data.count else { return nil }
-        var value: T = data.withUnsafeBytes { buf in
-            buf.load(fromByteOffset: offset, as: T.self)
-        }
-        return value
-    }
-
     private func readU32(_ offset: Int) -> UInt32? {
-        read(UInt32.self, at: offset)
+        guard offset >= 0, offset + 4 <= data.count else { return nil }
+        return UInt32(data[offset])
+            | (UInt32(data[offset + 1]) << 8)
+            | (UInt32(data[offset + 2]) << 16)
+            | (UInt32(data[offset + 3]) << 24)
     }
 
     func parse() -> MachOInfo {
@@ -53,7 +49,7 @@ final class MachOParser {
             return info
         }
 
-        let magic = data.withUnsafeBytes { $0.load(as: UInt32.self) }
+        let magic = readU32(0) ?? 0
 
         switch magic {
         case Self.FAT_MAGIC, Self.FAT_CIGAM:
@@ -173,11 +169,13 @@ final class MachOParser {
         case 0x19: // LC_SEGMENT_64
             if let namePtr = readSegmentName(offset) {
                 let vmaddr = toHost64(readSegmentField(offset, fieldOffset: 24) ?? 0, swapped: swapped)
+                let vmsize = toHost64(readSegmentField(offset, fieldOffset: 32) ?? 0, swapped: swapped)
                 let fileoff = toHost64(readSegmentField(offset, fieldOffset: 40) ?? 0, swapped: swapped)
                 let filesize = toHost64(readSegmentField(offset, fieldOffset: 48) ?? 0, swapped: swapped)
                 var seg = SegmentInfo()
                 seg.name = namePtr
                 seg.vmAddr = vmaddr
+                seg.vmSize = vmsize
                 seg.fileOffset = fileoff
                 seg.fileSize = filesize
                 info.segments.append(seg)
@@ -190,12 +188,51 @@ final class MachOParser {
             if nsyms > 0 && info.symbols.isEmpty {
                 parseSymbols(symoff, nsyms: nsyms, stroff: stroff, swapped: swapped, into: &info)
             }
-        case 0xC: // LC_LOAD_DYLIB
-            if let name = readDylibName(offset, cmdsize: cmdsize) {
-                info.loadCommands.append("LC_LOAD_DYLIB \(name)")
+        case 0xC, 0xD, 0x80000018, 0x8000001F, 0x80000023: // dylib commands
+            if let name = readDylibName(offset, cmdsize: cmdsize, swapped: swapped) {
+                info.loadCommands.append("\(loadCommandName(cmd)) \(name)")
+            }
+        case 0x1B: // LC_UUID
+            if let uuid = readUUID(offset) {
+                info.loadCommands.append("LC_UUID \(uuid)")
+            }
+        case 0x80000028: // LC_MAIN
+            let entryoff = toHost64(readSegmentField(offset, fieldOffset: 8) ?? 0, swapped: swapped)
+            let stacksize = toHost64(readSegmentField(offset, fieldOffset: 16) ?? 0, swapped: swapped)
+            info.loadCommands.append(String(format: "LC_MAIN entryoff 0x%08llX stacksize %llu", entryoff, stacksize))
+        case 0xE: // LC_LOAD_DYLINKER
+            if let name = readLoadCommandString(offset, cmdsize: cmdsize, stringOffsetField: 8, swapped: swapped) {
+                info.loadCommands.append("LC_LOAD_DYLINKER \(name)")
             }
         default:
-            info.loadCommands.append("cmd 0x\(String(cmd, radix: 16)) (size \(cmdsize))")
+            info.loadCommands.append("\(loadCommandName(cmd)) (size \(cmdsize))")
+        }
+    }
+
+    private func loadCommandName(_ cmd: UInt32) -> String {
+        switch cmd {
+        case 0x1: return "LC_SEGMENT"
+        case 0x2: return "LC_SYMTAB"
+        case 0x5: return "LC_UNIXTHREAD"
+        case 0xC: return "LC_LOAD_DYLIB"
+        case 0xD: return "LC_ID_DYLIB"
+        case 0xE: return "LC_LOAD_DYLINKER"
+        case 0x19: return "LC_SEGMENT_64"
+        case 0x1B: return "LC_UUID"
+        case 0x18: return "LC_TWOLEVEL_HINTS"
+        case 0x80000018: return "LC_LOAD_WEAK_DYLIB"
+        case 0x1D: return "LC_CODE_SIGNATURE"
+        case 0x8000001F: return "LC_REEXPORT_DYLIB"
+        case 0x22: return "LC_DYLD_INFO"
+        case 0x80000022: return "LC_DYLD_INFO_ONLY"
+        case 0x80000023: return "LC_LOAD_UPWARD_DYLIB"
+        case 0x24: return "LC_VERSION_MIN_MACOSX"
+        case 0x25: return "LC_VERSION_MIN_IPHONEOS"
+        case 0x29: return "LC_SOURCE_VERSION"
+        case 0x2A: return "LC_DYLIB_CODE_SIGN_DRS"
+        case 0x32: return "LC_BUILD_VERSION"
+        case 0x80000028: return "LC_MAIN"
+        default: return "cmd 0x\(String(cmd, radix: 16))"
         }
     }
 
@@ -211,8 +248,9 @@ final class MachOParser {
     private func readSegmentField(_ offset: Int, fieldOffset: Int) -> UInt64? {
         let abs = offset + fieldOffset
         guard abs >= 0, abs + 8 <= data.count else { return nil }
-        var value = data.withUnsafeBytes { buf in
-            buf.load(fromByteOffset: abs, as: UInt64.self)
+        var value: UInt64 = 0
+        for i in 0..<8 {
+            value |= UInt64(data[abs + i]) << (i * 8)
         }
         return value
     }
@@ -222,11 +260,18 @@ final class MachOParser {
         return toHost(v, swapped: swapped)
     }
 
-    private func readDylibName(_ offset: Int, cmdsize: Int) -> String? {
+    private func readDylibName(_ offset: Int, cmdsize: Int, swapped: Bool) -> String? {
         // LC_LOAD_DYLIB 结构：cmd(4) cmdsize(4) 依赖名偏移(4) 时间戳(4) 当前版本(4) 兼容版本(4) 然后字符串
-        let nameOffset = offset + 24
+        readLoadCommandString(offset, cmdsize: cmdsize, stringOffsetField: 8, swapped: swapped)
+    }
+
+    private func readLoadCommandString(_ offset: Int, cmdsize: Int, stringOffsetField: Int, swapped: Bool) -> String? {
+        guard let relativeOffsetRaw = readU32(offset + stringOffsetField) else { return nil }
+        let relativeOffset = Int(toHost(relativeOffsetRaw, swapped: swapped))
+        let nameOffset = offset + relativeOffset
         guard nameOffset < data.count else { return nil }
         let end = min(offset + cmdsize, data.count)
+        guard nameOffset < end else { return nil }
         var chars: [UInt8] = []
         var i = nameOffset
         while i < end {
@@ -236,6 +281,17 @@ final class MachOParser {
             i += 1
         }
         return String(bytes: chars, encoding: .utf8)
+    }
+
+    private func readUUID(_ offset: Int) -> String? {
+        let start = offset + 8
+        guard start >= 0, start + 16 <= data.count else { return nil }
+        let hex = (0..<16).map { String(format: "%02X", Int(data[start + $0])) }
+        return "\(hex[0])\(hex[1])\(hex[2])\(hex[3])-"
+            + "\(hex[4])\(hex[5])-"
+            + "\(hex[6])\(hex[7])-"
+            + "\(hex[8])\(hex[9])-"
+            + "\(hex[10])\(hex[11])\(hex[12])\(hex[13])\(hex[14])\(hex[15])"
     }
 
     // MARK: - 符号表

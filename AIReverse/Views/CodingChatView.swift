@@ -21,9 +21,7 @@ struct CodingChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             modelBar
-            if analysisStore.activeResult != nil {
-                analysisContextBar
-            }
+            analysisContextBar
             if !hasStartedConversation {
                 repoEntryCard
             }
@@ -69,7 +67,9 @@ struct CodingChatView: View {
     }
 
     private func syncAnalysisContext() {
-        agent.setAnalysisContext(analysisStore.activeResult)
+        let result = analysisStore.activeResult
+        agent.setAnalysisContext(result)
+        agent.includeAnalysisContext = result != nil
     }
 
     private var backgroundColor: Color {
@@ -211,32 +211,35 @@ struct CodingChatView: View {
 
     /// 分析上下文状态条：显示当前分析的文件，并支持开关附带
     private var analysisContextBar: some View {
+        let hasAnalysis = analysisStore.activeResult != nil
         HStack(spacing: 8) {
             Image(systemName: "doc.magnifyingglass")
                 .font(.caption)
-                .foregroundColor(accent)
+                .foregroundColor(hasAnalysis ? accent : .secondary)
             VStack(alignment: .leading, spacing: 0) {
                 Text("分析上下文")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
-                Text(analysisStore.activeResult?.url.lastPathComponent ?? "未知文件")
+                Text(analysisStore.activeResult?.url.lastPathComponent ?? "未加载分析文件")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.primary)
                     .lineLimit(1)
             }
             Spacer()
             Button {
+                guard hasAnalysis else { return }
                 agent.includeAnalysisContext.toggle()
             } label: {
-                Text(agent.includeAnalysisContext ? "已附带" : "已关闭")
+                Text(hasAnalysis ? (agent.includeAnalysisContext ? "已附带" : "已关闭") : "无上下文")
                     .font(.system(size: 11, weight: .medium))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(agent.includeAnalysisContext ? accent : Color(.systemGray5))
-                    .foregroundColor(agent.includeAnalysisContext ? .white : .secondary)
+                    .background(hasAnalysis && agent.includeAnalysisContext ? accent : Color(.systemGray5))
+                    .foregroundColor(hasAnalysis && agent.includeAnalysisContext ? .white : .secondary)
                     .cornerRadius(10)
             }
             .buttonStyle(.plain)
+            .disabled(!hasAnalysis)
         }
         .padding(.horizontal)
         .padding(.vertical, 6)

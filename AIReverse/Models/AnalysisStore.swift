@@ -19,9 +19,26 @@ struct AnalysisResult {
     /// 供聊天助手作为上下文注入的完整分析文本
     var contextText: String {
         var text = summary
+        let dylibs = macho.loadCommands.filter { $0.contains("DYLIB") }
+        if !dylibs.isEmpty {
+            text += "\n\n=== 动态库相关命令（前 80 条）===\n"
+            text += dylibs.prefix(80).joined(separator: "\n")
+        }
+        let interestingStrings = prioritizedStrings.filter(isInterestingReverseString)
+        if !interestingStrings.isEmpty {
+            text += "\n\n=== 可疑/关键字符串（前 120 条）===\n"
+            text += interestingStrings.prefix(120).joined(separator: "\n")
+        }
+        let keySymbols = symbols.filter { isInterestingReverseString($0.name) }
+        if !keySymbols.isEmpty {
+            text += "\n\n=== 关键符号（前 120 条）===\n"
+            text += keySymbols.prefix(120).map {
+                String(format: "0x%08llX %@ %@", $0.address, $0.type, $0.name)
+            }.joined(separator: "\n")
+        }
         if !macho.strings.isEmpty {
             text += "\n\n=== 提取的字符串（前 100 条）===\n"
-            text += macho.strings.prefix(100).joined(separator: "\n")
+            text += prioritizedStrings.prefix(100).joined(separator: "\n")
         }
         if !objcClasses.isEmpty {
             text += "\n\n=== ObjC 类与关键方法（前 50 个类）===\n"
@@ -40,6 +57,33 @@ struct AnalysisResult {
             }.joined(separator: "\n")
         }
         return text
+    }
+
+    private var prioritizedStrings: [String] {
+        macho.strings.sorted { left, right in
+            let leftScore = reverseSignalScore(left)
+            let rightScore = reverseSignalScore(right)
+            if leftScore == rightScore { return left.count < right.count }
+            return leftScore > rightScore
+        }
+    }
+
+    private func isInterestingReverseString(_ value: String) -> Bool {
+        reverseSignalScore(value) > 0
+    }
+
+    private func reverseSignalScore(_ value: String) -> Int {
+        let lower = value.lowercased()
+        let weightedKeywords: [(String, Int)] = [
+            ("http://", 8), ("https://", 8), ("api", 5), ("token", 6), ("secret", 6),
+            ("password", 6), ("auth", 5), ("login", 4), ("sign", 4), ("encrypt", 5),
+            ("decrypt", 5), ("key", 4), ("jailbreak", 7), ("cydia", 7), ("substrate", 7),
+            ("frida", 7), ("ptrace", 7), ("sysctl", 6), ("ssl", 5), ("certificate", 5),
+            ("pinning", 6), ("sqlite", 4), ("webview", 4), ("scheme", 3), ("callback", 3)
+        ]
+        return weightedKeywords.reduce(0) { score, item in
+            lower.contains(item.0) ? score + item.1 : score
+        }
     }
 }
 

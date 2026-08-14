@@ -12,6 +12,7 @@ final class StringExtractor {
     /// 提取可打印字符串（ASCII 可打印字符连续段，长度 >= 4）
     func extract(minLength: Int = 4, maxCount: Int = 5000) -> [String] {
         var result: [String] = []
+        var seen = Set<String>()
         var current: [UInt8] = []
 
         func flush() {
@@ -19,7 +20,7 @@ final class StringExtractor {
                 current.removeAll()
                 return
             }
-            if let s = String(bytes: current, encoding: .utf8), !s.isEmpty {
+            if let s = String(bytes: current, encoding: .utf8), isUsefulString(s), seen.insert(s).inserted {
                 result.append(s)
             }
             current.removeAll()
@@ -51,5 +52,21 @@ final class StringExtractor {
 
     private func isPrintable(_ b: UInt8) -> Bool {
         (b >= 0x20 && b <= 0x7E) || b == 0x09
+    }
+
+    private func isUsefulString(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 4 else { return false }
+
+        let scalarCount = max(trimmed.unicodeScalars.count, 1)
+        let punctuationCount = trimmed.unicodeScalars.filter { scalar in
+            CharacterSet.punctuationCharacters.contains(scalar) || CharacterSet.symbols.contains(scalar)
+        }.count
+        if Double(punctuationCount) / Double(scalarCount) > 0.75 { return false }
+
+        let uniqueScalars = Set(trimmed.unicodeScalars)
+        if uniqueScalars.count <= 2 && scalarCount > 12 { return false }
+
+        return true
     }
 }
