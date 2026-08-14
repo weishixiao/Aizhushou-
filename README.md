@@ -16,6 +16,9 @@
 - **自定义模型**：Base URL / API Key / 模型名全部可配置，支持多套模型保存切换
   （兼容 DeepSeek、OpenAI、Kimi、Ollama 等任何 OpenAI 兼容接口）
 - **文件导入**：通过系统文件选择器导入 `.tipa` / `.ipa` / `.app` / 裸 Mach-O
+- **授权工具**（设置页，需越狱 / TrollStore 环境）：
+  - **Root 终端**：通过 PTY + fork 启动本机授权 root shell，真实交互式命令执行
+  - **RootFS 管理**：全文件系统浏览，查看目录结构、文件大小与权限，支持文本/十六进制内容查看（只读）
 
 ## 构建（方式一：本地 Mac + Xcode）
 
@@ -74,7 +77,9 @@ AIReverse/
     │   ├── StringExtractor.swift  # 字符串提取
     │   ├── ZipReader.swift        # 纯 Swift ZIP 解压
     │   ├── AppAnalyzer.swift      # 分析协调器
-    │   └── LLMClient.swift        # OpenAI 兼容聊天客户端
+    │   ├── LLMClient.swift        # OpenAI 兼容聊天客户端
+    │   ├── RootShellService.swift # PTY root shell（越狱 / TrollStore）
+    │   └── RootFileService.swift  # RootFS 文件浏览
     └── Views/                 # 聊天 / 分析 / 模型设置界面
 ```
 

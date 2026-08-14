@@ -26,6 +26,32 @@ struct SettingsHubView: View {
                     )
                 }
             }
+
+            Section("授权工具") {
+                NavigationLink {
+                    RootTerminalView()
+                } label: {
+                    featureRow(
+                        icon: "terminal.fill",
+                        color: .orange,
+                        title: "Root 终端",
+                        subtitle: "连接本机授权 root shell，执行命令"
+                    )
+                }
+
+                NavigationLink {
+                    RootFSManagerView()
+                } label: {
+                    featureRow(
+                        icon: "externaldrive.fill",
+                        color: .indigo,
+                        title: "RootFS 管理",
+                        subtitle: "浏览设备文件系统、查看文件属性"
+                    )
+                }
+            } footer: {
+                Text("仅用于你拥有或已获得明确授权的设备环境。应用不会提供提权、绕过保护或注入能力。")
+            }
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)

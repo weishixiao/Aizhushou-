@@ -11,8 +11,6 @@ struct CodingChatView: View {
     @State private var inputText = ""
     @State private var showRepoSettings = false
     @State private var showModelSettings = false
-    @State private var showRootTerminal = false
-    @State private var showRootFS = false
     @State private var showUploadPicker = false
     @State private var uploadedFileName: String?
     @State private var uploadedFileURL: URL?
@@ -48,22 +46,6 @@ struct CodingChatView: View {
 
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 14) {
-                    Button {
-                        showRootTerminal = true
-                    } label: {
-                        Image(systemName: "terminal.fill")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(accent)
-                    }
-
-                    Button {
-                        showRootFS = true
-                    } label: {
-                        Image(systemName: "externaldrive.fill")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(accent)
-                    }
-
                     Button {
                         showRepoSettings = true
                     } label: {
@@ -103,29 +85,9 @@ struct CodingChatView: View {
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("完成") { showModelSettings = false }
-                }
-            }
-        }
-        .sheet(isPresented: $showRootTerminal) {
-            NavigationView {
-                RootTerminalView()
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("完成") { showRootTerminal = false }
                         }
                     }
             }
-        }
-        .sheet(isPresented: $showRootFS) {
-            NavigationView {
-                RootFSManagerView()
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("完成") { showRootFS = false }
-                        }
-                    }
-            }
-        }
         }
         .sheet(isPresented: $showUploadPicker) {
             DocumentPicker(allowedContentTypes: [.item], onPick: { url in
