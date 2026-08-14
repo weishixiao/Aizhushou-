@@ -3,27 +3,8 @@ import Darwin
 
 /// 根工具可用性检测
 enum RootExecutionEnvironment {
-    static let forceShowToolsKey = "force_show_system_tools"
-
     static var supportsRootTools: Bool {
         hasExecutableShell || hasJailbreakIndicators || getuid() == 0
-    }
-
-    static var shouldShowTools: Bool {
-        supportsRootTools || UserDefaults.standard.bool(forKey: forceShowToolsKey)
-    }
-
-    static var diagnosticText: String {
-        if hasExecutableShell {
-            return "已检测到可执行 shell"
-        }
-        if hasJailbreakIndicators {
-            return "已检测到越狱环境标记，shell 路径可能需要在连接时继续探测"
-        }
-        if UserDefaults.standard.bool(forKey: forceShowToolsKey) {
-            return "已手动显示系统工具入口"
-        }
-        return "未检测到系统终端能力"
     }
 
     private static var hasExecutableShell: Bool {
