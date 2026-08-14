@@ -212,7 +212,7 @@ struct CodingChatView: View {
     /// 分析上下文状态条：显示当前分析的文件，并支持开关附带
     private var analysisContextBar: some View {
         let hasAnalysis = analysisStore.activeResult != nil
-        HStack(spacing: 8) {
+        return HStack(spacing: 8) {
             Image(systemName: "doc.magnifyingglass")
                 .font(.caption)
                 .foregroundColor(hasAnalysis ? accent : .secondary)
