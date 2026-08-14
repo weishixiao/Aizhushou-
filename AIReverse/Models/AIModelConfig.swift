@@ -1,5 +1,13 @@
 import Foundation
 
+/// 模型 API 协议类型
+enum ModelAPIType: String, Codable, CaseIterable, Hashable {
+    /// OpenAI 兼容（/v1/chat/completions）
+    case openAI
+    /// Anthropic Claude（/v1/messages）
+    case anthropic
+}
+
 struct AIModelConfig: Identifiable, Codable, Equatable {
     var id = UUID()
     var name: String
@@ -7,10 +15,48 @@ struct AIModelConfig: Identifiable, Codable, Equatable {
     var apiKey: String
     var modelID: String
     var maxTokens: Int = 4096
+    var apiType: ModelAPIType = .openAI
 
     var isFilled: Bool {
         !baseURL.trimmingCharacters(in: .whitespaces).isEmpty
             && !modelID.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, baseURL, apiKey, modelID, maxTokens, apiType
+    }
+
+    init(id: UUID = UUID(), name: String, baseURL: String, apiKey: String, modelID: String, maxTokens: Int = 4096, apiType: ModelAPIType = .openAI) {
+        self.id = id
+        self.name = name
+        self.baseURL = baseURL
+        self.apiKey = apiKey
+        self.modelID = modelID
+        self.maxTokens = maxTokens
+        self.apiType = apiType
+    }
+
+    /// 兼容旧版本存档（无 apiType 字段时默认 openAI）
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        baseURL = try c.decode(String.self, forKey: .baseURL)
+        apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+        modelID = try c.decode(String.self, forKey: .modelID)
+        maxTokens = try c.decodeIfPresent(Int.self, forKey: .maxTokens) ?? 4096
+        apiType = try c.decodeIfPresent(ModelAPIType.self, forKey: .apiType) ?? .openAI
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(baseURL, forKey: .baseURL)
+        try c.encode(apiKey, forKey: .apiKey)
+        try c.encode(modelID, forKey: .modelID)
+        try c.encode(maxTokens, forKey: .maxTokens)
+        try c.encode(apiType, forKey: .apiType)
     }
 }
 
