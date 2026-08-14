@@ -116,11 +116,11 @@ struct RepoManagerView: View {
             }
         }
         .sheet(isPresented: $showDocumentPicker) {
-            DocumentPicker { url in
+            DocumentPicker(onPick: { url in
                 agent.setWorkspace(url)
                 try? agent.workspace.ensureWorkspaceExists()
                 agent.resetConversation()
-            }
+            })
         }
     }
 

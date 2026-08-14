@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// MonkeyCode 工作台风格的单聊编程助手界面：
 /// 顶部模型信息条 + 文档式消息流 + 圆角输入区
@@ -9,9 +10,13 @@ struct CodingChatView: View {
 
     @State private var inputText = ""
     @State private var showRepoSettings = false
-    @State private var showModelPicker = false
+    @State private var showModelSettings = false
+    @State private var showUploadPicker = false
+    @State private var uploadedFileName: String?
+    @State private var uploadError: String?
 
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
+    private let packageExtensions: Set<String> = ["ipa", "tipa", "deb"]
 
     init(workspace: WorkspaceManager) {
         _agent = StateObject(wrappedValue: CodingAgent(workspace: workspace))
@@ -19,23 +24,30 @@ struct CodingChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            modelBar
-            if !hasStartedConversation {
-                repoEntryCard
-            }
             messageList
+            uploadStatusBar
             inputBar
         }
         .background(backgroundColor.ignoresSafeArea())
-        .navigationTitle("实现 Git 仓库接口")
+        .navigationTitle("AI 对话")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showModelSettings = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(accent)
+                }
+            }
+
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     showRepoSettings = true
                 } label: {
-                    Label("仓库", systemImage: "folder.fill")
-                        .font(.system(size: 13, weight: .medium))
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 16, weight: .medium))
                         .foregroundColor(accent)
                 }
             }
@@ -50,8 +62,20 @@ struct CodingChatView: View {
                     }
             }
         }
-        .sheet(isPresented: $showModelPicker) {
-            ModelPickerView(modelStore: modelStore)
+        .sheet(isPresented: $showModelSettings) {
+            NavigationView {
+                ModelSettingsView()
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("完成") { showModelSettings = false }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showUploadPicker) {
+            DocumentPicker(allowedContentTypes: [.item], onPick: { url in
+                importPackageFile(url)
+            })
         }
         .onAppear {
             if agent.messages.isEmpty {
@@ -64,155 +88,40 @@ struct CodingChatView: View {
         Color(red: 0.98, green: 0.97, blue: 0.95)
     }
 
-    // MARK: - 顶部模型信息条
+    // MARK: - 状态信息
 
-    private var modelBar: some View {
-        HStack(spacing: 10) {
-            // 圆环徽标（会话序号）
-            ZStack {
-                Circle()
-                    .stroke(Color.orange, lineWidth: 1.5)
-                    .frame(width: 32, height: 32)
-                Text("\(sessionCount)")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.orange)
-            }
-
-            // 模型胶囊（点击切换模型）
-            Button {
-                showModelPicker = true
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "cpu.fill")
+    private var uploadStatusBar: some View {
+        Group {
+            if let name = uploadedFileName {
+                HStack(spacing: 8) {
+                    Image(systemName: "shippingbox")
                         .font(.caption)
-                        .foregroundColor(.blue)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text("基础模型")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-                        Text(modelName)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                    }
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 10))
+                        .foregroundColor(accent)
+                    Text("已上传：\(name)")
+                        .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                    Spacer()
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
                 .background(Color.white)
-                .cornerRadius(16)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(Color.black.opacity(0.08), lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            // token 信息
-            Text("\(tokenDisplay)")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-
-            // 允许修改开关（绿色小徽标）
-            Button {
-                agent.allowMutating.toggle()
-            } label: {
-                Text(agent.allowMutating ? "可修改" : "只读")
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(agent.allowMutating ? accent : Color(.systemGray5))
-                    .foregroundColor(agent.allowMutating ? .white : .secondary)
-                    .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color.white)
-        .overlay(
-            Rectangle()
-                .fill(Color.black.opacity(0.05))
-                .frame(height: 1),
-            alignment: .bottom
-        )
-    }
-
-    private var sessionCount: Int {
-        agent.messages.filter { $0.role == .user }.count + 1
-    }
-
-    /// 是否已开始对话（有用户消息则隐藏引导卡片）
-    private var hasStartedConversation: Bool {
-        agent.messages.contains { $0.role == .user }
-    }
-
-    /// 仓库引导卡片：会话开始前的显眼入口
-    private var repoEntryCard: some View {
-        let isDefault = agent.workspace.workspaceRoot?.path == agent.workspace.defaultRoot()?.path
-        let label = isDefault ? "打开 / 导入仓库" : "切换仓库"
-        let caption = isDefault
-            ? "连接你的 Git 仓库后，AI 才能读取并优化你的项目代码。"
-            : "当前仓库：\(agent.workspace.workspaceRoot?.lastPathComponent ?? "未知")"
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 16))
-                    .foregroundColor(accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("连接 Git 仓库")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text(caption)
-                        .font(.system(size: 12))
+            } else if let error = uploadError {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Text(error)
+                        .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(2)
+                    Spacer()
                 }
-                Spacer()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color.white)
             }
-            Button {
-                showRepoSettings = true
-            } label: {
-                Label(label, systemImage: "folder.fill.badge.plus")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(accent)
-                    .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(14)
-        .background(Color.white)
-        .cornerRadius(14)
-        .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .stroke(accent.opacity(0.25), lineWidth: 1)
-        )
-        .padding(.horizontal, 16)
-        .padding(.top, 12)
-    }
-
-    private var modelName: String {
-        if let model = modelStore.selectedModel {
-            return model.modelID
-        }
-        return "未配置模型"
-    }
-
-    private var tokenDisplay: String {
-        let count = agent.messages.reduce(0) { $0 + $1.content.count }
-        if count >= 1_000_000 {
-            return String(format: "%.1fM tokens", Double(count) / 1_000_000)
-        }
-        if count >= 1_000 {
-            return String(format: "%.1fK tokens", Double(count) / 1_000)
-        }
-        return "\(count) tokens"
     }
 
     // MARK: - 文档式消息流
@@ -226,16 +135,8 @@ struct CodingChatView: View {
                             .id(msg.id)
                     }
                     if agent.isWorking {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(accent)
-                            Text("思考中...")
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.vertical, 6)
-                        .id("typing")
+                        stageIndicator
+                            .id("typing")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -254,6 +155,31 @@ struct CodingChatView: View {
         }
     }
 
+    private var stageIndicator: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(accent)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(agent.stageText ?? "思考中")
+                    .font(.footnote)
+                    .foregroundColor(.primary)
+                Text("AI 正在处理，请稍候")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.white)
+        .cornerRadius(12)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(accent.opacity(0.2), lineWidth: 1)
+        )
+    }
+
     // MARK: - 输入区
 
     private var inputBar: some View {
@@ -261,7 +187,7 @@ struct CodingChatView: View {
             // 输入框（胶囊形白底）
             HStack(alignment: .bottom, spacing: 0) {
                 Button {
-                    showRepoSettings = true
+                    showUploadPicker = true
                 } label: {
                     Image(systemName: "paperclip")
                         .font(.system(size: 16))
@@ -272,12 +198,12 @@ struct CodingChatView: View {
                 .buttonStyle(.plain)
 
                 if #available(iOS 16.0, *) {
-                    TextField("向 AI 描述你的编码任务...", text: $inputText, axis: .vertical)
+                    TextField("发送消息，或上传 ipa / tipa / deb...", text: $inputText, axis: .vertical)
                         .lineLimit(1...5)
                         .font(.system(size: 15))
                         .padding(.vertical, 10)
                 } else {
-                    TextField("向 AI 描述你的编码任务...", text: $inputText)
+                    TextField("发送消息，或上传 ipa / tipa / deb...", text: $inputText)
                         .font(.system(size: 15))
                         .padding(.vertical, 10)
                 }
@@ -346,23 +272,45 @@ struct CodingChatView: View {
 
     private func seedWelcome() {
         let text = """
-        # 实现 Git 仓库接口
-
-        欢迎使用编程助手。你可以让我直接读写代码、查看 git 状态并提交变更。
-
-        ## 开始之前
-
-        1. 点右上角文件夹图标，打开本地目录或导入 GitHub 仓库
-        2. 在「模型设置」页配置并选择一个模型
-        3. 开启顶部「可修改」开关后，我才能写文件与提交
-
-        ## 试试这样问我
-
-        - 查看当前工作区有哪些文件
-        - 帮我新增一个工具函数
-        - 提交当前的所有变更
+        你好，我是 AIReverse。你可以直接发消息，也可以点击输入框左侧附件上传 ipa、tipa 或 deb 文件。
         """
-        agent.messages.append(ChatMessage(role: .assistant, content: text))
+        agent.appendLocalMessage(role: .assistant, content: text)
+    }
+
+    private func importPackageFile(_ url: URL) {
+        let ext = url.pathExtension.lowercased()
+        guard packageExtensions.contains(ext) else {
+            uploadError = "仅支持上传 .ipa、.tipa、.deb 文件"
+            uploadedFileName = nil
+            return
+        }
+        do {
+            let savedURL = try saveUploadedPackage(url)
+            uploadedFileName = savedURL.lastPathComponent
+            uploadError = nil
+            agent.appendLocalMessage(role: .user, content: "已上传文件：\(savedURL.lastPathComponent)")
+        } catch {
+            uploadError = "上传失败：\(error.localizedDescription)"
+            uploadedFileName = nil
+        }
+    }
+
+    private func saveUploadedPackage(_ url: URL) throws -> URL {
+        let fileManager = FileManager.default
+        guard let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        let uploads = docs.appendingPathComponent("Uploads", isDirectory: true)
+        try fileManager.createDirectory(at: uploads, withIntermediateDirectories: true)
+
+        let timestamp = Int(Date().timeIntervalSince1970)
+        let baseName = url.deletingPathExtension().lastPathComponent
+        let safeName = baseName.isEmpty ? "package" : baseName
+        let destination = uploads
+            .appendingPathComponent("\(safeName)-\(timestamp)")
+            .appendingPathExtension(url.pathExtension)
+        try fileManager.copyItem(at: url, to: destination)
+        return destination
     }
 }
 
@@ -405,57 +353,5 @@ struct DocumentMessageRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-/// 模型选择器：点击模型胶囊后弹出，选择当前使用的模型
-struct ModelPickerView: View {
-    @ObservedObject var modelStore: ModelStore
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationView {
-            List {
-                if modelStore.models.isEmpty {
-                    Section {
-                        Text("还没有添加模型，请先到「模型设置」页添加。")
-                            .foregroundColor(.secondary)
-                    }
-                } else {
-                    Section("选择模型") {
-                        ForEach(modelStore.models) { model in
-                            Button {
-                                modelStore.select(model.id)
-                                dismiss()
-                            } label: {
-                                HStack {
-                                    Image(systemName: modelStore.selectedModel?.id == model.id
-                                          ? "checkmark.circle.fill" : "circle")
-                                        .foregroundColor(modelStore.selectedModel?.id == model.id
-                                                         ? Color(red: 0.10, green: 0.62, blue: 0.42) : .secondary)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(model.name)
-                                            .font(.body)
-                                            .foregroundColor(.primary)
-                                        Text(model.modelID)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("切换模型")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") { dismiss() }
-                }
-            }
-        }
     }
 }

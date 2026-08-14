@@ -12,7 +12,7 @@ struct ToolCall: Equatable {
 }
 
 struct ChatMessage: Identifiable, Equatable {
-    enum Role: String {
+    enum Role: String, Codable {
         case user
         case assistant
         case system
@@ -30,9 +30,10 @@ struct ChatMessage: Identifiable, Equatable {
     /// assistant 消息携带的工具调用列表
     var assistantToolCalls: [ToolCall]?
 
-    init(role: Role, content: String, toolCallID: String? = nil, name: String? = nil, assistantToolCalls: [ToolCall]? = nil) {
+    init(role: Role, content: String, date: Date = Date(), toolCallID: String? = nil, name: String? = nil, assistantToolCalls: [ToolCall]? = nil) {
         self.role = role
         self.content = content
+        self.date = date
         self.toolCallID = toolCallID
         self.name = name
         self.assistantToolCalls = assistantToolCalls

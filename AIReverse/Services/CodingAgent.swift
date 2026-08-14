@@ -23,6 +23,7 @@ final class CodingAgent: ObservableObject {
     @Published var isWorking = false
     @Published var allowMutating = false
     @Published var errorMessage: String?
+    @Published var stageText: String?
 
     var repoConfig = GitRepoConfig()
     private(set) var workspace: WorkspaceManager
@@ -34,6 +35,7 @@ final class CodingAgent: ObservableObject {
     private var isCancelled = false
 
     private let maxToolIterations = 15
+    private let conversationFileName = "conversation.json"
 
     init(workspace: WorkspaceManager) {
         self.workspace = workspace
@@ -46,6 +48,7 @@ final class CodingAgent: ObservableObject {
         registry.register(RepoOverviewTool())
         registry.register(WriteFileTool())
         registry.register(GitCommitTool())
+        restoreConversation()
     }
 
     /// 发送用户消息并驱动工具调用循环
@@ -56,17 +59,22 @@ final class CodingAgent: ObservableObject {
 
         await MainActor.run {
             isWorking = true
+            stageText = "准备发送请求"
             errorMessage = nil
             messages.append(ChatMessage(role: .user, content: text))
+            saveConversation()
         }
 
         var history = buildHistory()
 
         do {
             var finalText: String?
-            for _ in 0..<maxToolIterations {
+            toolLoop: for _ in 0..<maxToolIterations {
                 if isCancelled { break }
 
+                await MainActor.run {
+                    stageText = "等待模型回复"
+                }
                 let reply = try await client.chat(
                     model: model,
                     messages: history,
@@ -76,8 +84,11 @@ final class CodingAgent: ObservableObject {
                 case .text(let content):
                     finalText = content
                     await MainActor.run {
+                        stageText = "整理回复内容"
                         messages.append(ChatMessage(role: .assistant, content: content))
+                        saveConversation()
                     }
+                    break toolLoop
                 case .toolCalls(let calls):
                     let assistantMsg = ChatMessage(role: .assistant, content: "", assistantToolCalls: calls)
                     history.append(assistantMsg)
@@ -86,6 +97,7 @@ final class CodingAgent: ObservableObject {
                     for call in calls {
                         if isCancelled { break }
                         await MainActor.run {
+                            stageText = "执行工具：\(call.name)"
                             upsertToolCard(call, status: .running)
                         }
                         do {
@@ -106,12 +118,14 @@ final class CodingAgent: ObservableObject {
                                 name: call.name
                             ))
                             await MainActor.run {
+                                stageText = result.success ? "工具执行完成：\(call.name)" : "工具执行失败：\(call.name)"
                                 upsertToolCard(call, status: result.success ? .success : .failed, result: result.output)
                             }
                         } catch {
                             let msg = "执行失败：\(error.localizedDescription)"
                             toolMessages.append(ChatMessage(role: .tool, content: msg, toolCallID: call.id, name: call.name))
                             await MainActor.run {
+                                stageText = "工具执行失败：\(call.name)"
                                 upsertToolCard(call, status: .failed, result: msg)
                             }
                         }
@@ -123,16 +137,19 @@ final class CodingAgent: ObservableObject {
                 // 达到迭代上限仍无文本，给出提示
                 await MainActor.run {
                     messages.append(ChatMessage(role: .assistant, content: "工具调用次数过多，已停止。请简化指令或重新提问。"))
+                    saveConversation()
                 }
             }
         } catch {
             await MainActor.run {
                 errorMessage = error.localizedDescription
+                stageText = "请求失败"
             }
         }
 
         await MainActor.run {
             isWorking = false
+            stageText = nil
         }
     }
 
@@ -150,6 +167,13 @@ final class CodingAgent: ObservableObject {
         messages.removeAll()
         toolCards.removeAll()
         errorMessage = nil
+        stageText = nil
+        saveConversation()
+    }
+
+    func appendLocalMessage(role: ChatMessage.Role, content: String) {
+        messages.append(ChatMessage(role: role, content: content))
+        saveConversation()
     }
 
     // MARK: - Private
@@ -195,4 +219,33 @@ final class CodingAgent: ObservableObject {
         if s.count <= limit { return s }
         return String(s.prefix(limit)) + "\n...[已截断]"
     }
+
+    private func restoreConversation() {
+        guard let url = conversationURL(),
+              let data = try? Data(contentsOf: url),
+              let records = try? JSONDecoder().decode([StoredChatMessage].self, from: data) else {
+            return
+        }
+        messages = records.map { ChatMessage(role: $0.role, content: $0.content, date: $0.date) }
+    }
+
+    private func saveConversation() {
+        guard let url = conversationURL() else { return }
+        let records = messages
+            .filter { $0.role == .user || $0.role == .assistant }
+            .map { StoredChatMessage(role: $0.role, content: $0.content, date: $0.date) }
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func conversationURL() -> URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?
+            .appendingPathComponent(conversationFileName)
+    }
+}
+
+private struct StoredChatMessage: Codable {
+    let role: ChatMessage.Role
+    let content: String
+    let date: Date
 }

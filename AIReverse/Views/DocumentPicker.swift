@@ -6,14 +6,24 @@ import UniformTypeIdentifiers
 /// 使用 asCopy: true，系统会将选中文件直接复制到 App 沙盒 tmp/inbox，
 /// 返回本地 URL，不依赖临时授权，任何扩展名（含 .tipa）均可选中。
 struct DocumentPicker: UIViewControllerRepresentable {
+    var allowedContentTypes: [UTType] = [.item, .folder]
     var onPick: (URL) -> Void
     var onCancel: () -> Void = {}
+
+    init(
+        allowedContentTypes: [UTType] = [.item, .folder],
+        onPick: @escaping (URL) -> Void,
+        onCancel: @escaping () -> Void = {}
+    ) {
+        self.allowedContentTypes = allowedContentTypes
+        self.onPick = onPick
+        self.onCancel = onCancel
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
-        let types: [UTType] = [.item, .folder]
-        let picker = UIDocumentPickerViewController(forOpeningContentTypes: types, asCopy: true)
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: allowedContentTypes, asCopy: true)
         picker.allowsMultipleSelection = false
         picker.delegate = context.coordinator
         return picker
