@@ -20,6 +20,13 @@ enum MarkdownParser {
         var codeBuffer: [String] = []
         var codeLanguage = ""
         var inCode = false
+        var paragraphBuffer: [String] = []
+
+        func flushParagraph() {
+            guard !paragraphBuffer.isEmpty else { return }
+            blocks.append(.paragraph(paragraphBuffer.joined(separator: " ")))
+            paragraphBuffer.removeAll()
+        }
 
         func flushCode() {
             guard !codeBuffer.isEmpty || inCode else { return }
@@ -36,6 +43,7 @@ enum MarkdownParser {
                     inCode = false
                     flushCode()
                 } else {
+                    flushParagraph()
                     flushCode()
                     inCode = true
                     codeLanguage = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
@@ -47,57 +55,67 @@ enum MarkdownParser {
                 continue
             }
             if trimmed.isEmpty {
+                flushParagraph()
                 continue
             }
             // 标题
             if trimmed.hasPrefix("### ") {
+                flushParagraph()
                 flushCode()
                 blocks.append(.heading(3, String(trimmed.dropFirst(4))))
                 continue
             }
             if trimmed.hasPrefix("## ") {
+                flushParagraph()
                 flushCode()
                 blocks.append(.heading(2, String(trimmed.dropFirst(3))))
                 continue
             }
             if trimmed.hasPrefix("# ") {
+                flushParagraph()
                 flushCode()
                 blocks.append(.heading(1, String(trimmed.dropFirst(2))))
                 continue
             }
             // 分隔线
             if trimmed == "---" || trimmed == "***" || trimmed == "___" {
+                flushParagraph()
                 flushCode()
                 blocks.append(.rule)
                 continue
             }
             // 引用
             if trimmed.hasPrefix("> ") {
+                flushParagraph()
                 flushCode()
                 blocks.append(.quote(String(trimmed.dropFirst(2))))
                 continue
             }
             // 列表
             if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+                flushParagraph()
                 flushCode()
                 blocks.append(.listItem(level: 0, text: String(trimmed.dropFirst(2))))
                 continue
             }
             if trimmed.hasPrefix("  - ") || trimmed.hasPrefix("\t- ") {
+                flushParagraph()
                 flushCode()
                 blocks.append(.listItem(level: 1, text: String(trimmed.dropFirst(4))))
                 continue
             }
             // 有序列表
             if let dot = trimmed.firstIndex(of: "."), trimmed[..<dot].allSatisfy({ $0.isNumber }) {
+                flushParagraph()
                 flushCode()
                 let after = trimmed[dot...].dropFirst()
                 blocks.append(.listItem(level: 0, text: String(after).trimmingCharacters(in: .whitespaces)))
                 continue
             }
             // 段落
-            blocks.append(.paragraph(trimmed))
+            paragraphBuffer.append(trimmed)
         }
+        flushParagraph()
         flushCode()
         return blocks
     }
@@ -108,58 +126,55 @@ struct InlineText: View {
     let text: String
 
     var body: some View {
-        render(text)
-    }
-
-    /// 拆分为普通文本与行内代码片段，代码以绿色等宽渲染
-    private func render(_ content: String) -> some View {
-        let segments = splitInlineCode(content)
-        return HStack(spacing: 2) {
-            ForEach(segments.indices, id: \.self) { idx in
-                let seg = segments[idx]
-                if seg.isCode {
-                    Text(seg.text)
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(codeAccent)
-                } else if let attributed = try? AttributedString(markdown: seg.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-                    Text(attributed)
-                } else {
-                    Text(seg.text)
-                }
-            }
-        }
+        Text(attributedText(text))
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var codeAccent: Color {
         Color(red: 0.05, green: 0.55, blue: 0.35)
     }
 
-    /// 用反引号拆分行内代码
-    private func splitInlineCode(_ content: String) -> [(text: String, isCode: Bool)] {
-        var result: [(String, Bool)] = []
+    private func attributedText(_ content: String) -> AttributedString {
+        var result = AttributedString()
         var buffer = ""
         var inCode = false
+
+        func appendBuffer(asCode: Bool) {
+            guard !buffer.isEmpty else { return }
+            var segment = parseMarkdown(buffer)
+            if asCode {
+                segment.font = .system(size: 14, design: .monospaced)
+                segment.foregroundColor = codeAccent
+            }
+            result.append(segment)
+            buffer = ""
+        }
+
         for ch in content {
             if ch == "`" {
                 if inCode {
-                    result.append((buffer, true))
-                    buffer = ""
+                    appendBuffer(asCode: true)
                     inCode = false
                 } else {
-                    if !buffer.isEmpty {
-                        result.append((buffer, false))
-                    }
-                    buffer = ""
+                    appendBuffer(asCode: false)
                     inCode = true
                 }
             } else {
                 buffer.append(ch)
             }
         }
-        if !buffer.isEmpty {
-            result.append((buffer, inCode))
-        }
+        appendBuffer(asCode: inCode)
         return result
+    }
+
+    private func parseMarkdown(_ content: String) -> AttributedString {
+        if let attributed = try? AttributedString(
+            markdown: content,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return attributed
+        }
+        return AttributedString(content)
     }
 }
 
@@ -221,7 +236,7 @@ struct MarkdownView: View {
     let content: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(Array(MarkdownParser.parse(content).enumerated()), id: \.offset) { _, block in
                 renderBlock(block)
             }
