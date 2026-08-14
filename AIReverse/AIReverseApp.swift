@@ -2,12 +2,14 @@ import SwiftUI
 
 @main
 struct AIReverseApp: App {
-    @StateObject private var analysisStore = AnalysisStore()
+    @StateObject private var modelStore = ModelStore()
+    @StateObject private var workspace = WorkspaceManager()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(analysisStore)
+                .environmentObject(modelStore)
+                .environmentObject(workspace)
         }
     }
 }
