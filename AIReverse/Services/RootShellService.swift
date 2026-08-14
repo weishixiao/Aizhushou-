@@ -21,9 +21,11 @@ final class RootShellService: ObservableObject {
     private var childPID: pid_t = 0
     private var readSource: DispatchSourceRead?
     private let readQueue = DispatchQueue(label: "rootshell.read", qos: .userInitiated)
+    private let ioQueue = DispatchQueue(label: "rootshell.io")
 
     deinit {
-        stop()
+        stopReading()
+        teardownProcess()
     }
 
     var isRunning: Bool { state.running }
@@ -42,34 +44,55 @@ final class RootShellService: ObservableObject {
 
     /// 向 shell 发送一行命令
     func send(_ line: String) {
-        guard state.running, masterFD >= 0 else { return }
+        guard state.running else { return }
         var payload = Data(line.utf8)
         payload.append(0x0A)
-        payload.withUnsafeBytes { raw in
-            guard let base = raw.baseAddress else { return }
-            _ = write(masterFD, base, payload.count)
+        ioQueue.sync {
+            guard masterFD >= 0 else { return }
+            payload.withUnsafeBytes { raw in
+                guard let base = raw.baseAddress else { return }
+                let total = payload.count
+                var written = 0
+                while written < total {
+                    let n = write(masterFD, base + written, total - written)
+                    if n > 0 {
+                        written += n
+                    } else if n < 0 && errno == EINTR {
+                        continue
+                    } else {
+                        break
+                    }
+                }
+            }
         }
     }
 
     /// 停止 shell 进程并清理资源
     func stop() {
         stopReading()
-        let pid = childPID
-        let fd = masterFD
-        childPID = 0
-        masterFD = -1
-        if fd >= 0 {
-            close(fd)
+        teardownProcess()
+        DispatchQueue.main.async { [weak self] in
+            self?.state = ShellState(running: false, lastError: nil)
         }
-        if pid > 0 {
-            kill(pid, SIGHUP)
-            DispatchQueue.global(qos: .utility).async {
-                var status: Int32 = 0
-                waitpid(pid, &status, 0)
+    }
+
+    /// 仅清理子进程与文件描述符，不触碰 UI 状态（可在 deinit 中安全调用）
+    private func teardownProcess() {
+        ioQueue.sync {
+            let pid = childPID
+            let fd = masterFD
+            childPID = 0
+            masterFD = -1
+            if fd >= 0 {
+                close(fd)
             }
-        }
-        DispatchQueue.main.async {
-            self.state = ShellState(running: false, lastError: nil)
+            if pid > 0 {
+                kill(pid, SIGHUP)
+                DispatchQueue.global(qos: .utility).async {
+                    var status: Int32 = 0
+                    waitpid(pid, &status, 0)
+                }
+            }
         }
     }
 
@@ -117,11 +140,8 @@ final class RootShellService: ObservableObject {
 
         var pid: pid_t = 0
         let pathC = strdup(shell)
-        let argv: [UnsafeMutablePointer<CChar>?] = [
-            pathC,
-            strdup("-i"),
-            nil
-        ]
+        let argI = strdup("-i")
+        let argv: [UnsafeMutablePointer<CChar>?] = [pathC, argI, nil]
         let spawnResult = argv.withUnsafeBufferPointer { argvPtr -> Int32 in
             posix_spawn(&pid, shell, &actions, &attr, argvPtr.baseAddress, nil)
         }
@@ -129,9 +149,10 @@ final class RootShellService: ObservableObject {
         posix_spawn_file_actions_destroy(&actions)
         posix_spawnattr_destroy(&attr)
         close(slave)
+        free(pathC)
+        free(argI)
 
         if spawnResult != 0 {
-            free(pathC)
             close(master)
             state.lastError = "posix_spawn 失败：\(String(cString: strerror(spawnResult)))"
             return false
@@ -139,6 +160,7 @@ final class RootShellService: ObservableObject {
 
         masterFD = master
         childPID = pid
+        setWindowSize(master: master)
         state = ShellState(running: true, lastError: nil)
         startReading()
         return true
@@ -152,7 +174,10 @@ final class RootShellService: ObservableObject {
         source.setEventHandler { [weak self] in
             guard let self else { return }
             var buffer = [UInt8](repeating: 0, count: 4096)
-            let n = read(fd, &buffer, buffer.count)
+            let n = self.ioQueue.sync { () -> Int in
+                guard self.masterFD == fd else { return -2 }
+                return read(fd, &buffer, buffer.count)
+            }
             if n > 0 {
                 let text = String(decoding: buffer.prefix(n), as: UTF8.self)
                 DispatchQueue.main.async {
@@ -161,10 +186,18 @@ final class RootShellService: ObservableObject {
                         self.output = String(self.output.suffix(100_000))
                     }
                 }
-            } else if n < 0 && errno != EAGAIN {
+            } else if n == 0 {
                 self.readSource?.cancel()
+                self.teardownProcess()
                 DispatchQueue.main.async {
-                    self.state = ShellState(running: false, lastError: nil)
+                    self.state = ShellState(running: false, lastError: "shell 已退出")
+                }
+            } else if n == -2 || (n < 0 && errno != EAGAIN) {
+                self.readSource?.cancel()
+                let err = errno
+                self.teardownProcess()
+                DispatchQueue.main.async {
+                    self.state = ShellState(running: false, lastError: n == -2 ? "终端已关闭" : "读取终端失败：\(String(cString: strerror(err)))")
                 }
             }
         }
@@ -177,6 +210,16 @@ final class RootShellService: ObservableObject {
         readSource = nil
     }
 
+    /// 设置 PTY 从设备的窗口尺寸，使 shell 的终端尺寸正确
+    private func setWindowSize(master: Int32) {
+        var ws = winsize()
+        ws.ws_row = 24
+        ws.ws_col = 80
+        ws.ws_xpixel = 0
+        ws.ws_ypixel = 0
+        ioctl(master, TIOCSWINSZ, &ws)
+    }
+
     /// 清理 PTY 原始输出中的 ANSI 控制序列，保留可读文本
     private static func clean(_ raw: String) -> String {
         var result = ""
@@ -185,8 +228,10 @@ final class RootShellService: ObservableObject {
         while index < raw.endIndex {
             let ch = raw[index]
             if skipESC {
-                if ch == "m" || ch == "n" || ch == "r" || ch == "H" || ch == "K" || ch == "J" || ch == "G" || ch == "A" || ch == "B" || ch == "C" || ch == "D" || ch == "s" || ch == "u" || ch == "f" || ch == "l" || ch == "h" {
+                if ch == "m" || ch == "n" || ch == "r" || ch == "H" || ch == "K" || ch == "J" || ch == "G" || ch == "A" || ch == "B" || ch == "C" || ch == "D" || ch == "s" || ch == "u" || ch == "f" || ch == "l" || ch == "h" || ch == "P" || ch == "X" || ch == "@" || ch == "`" {
                     skipESC = false
+                } else if ch == "[" {
+                    // CSI 序列可能包含多个中间字节，继续等待终止字符
                 }
                 index = raw.index(after: index)
                 continue

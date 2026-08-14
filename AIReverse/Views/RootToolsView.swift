@@ -13,8 +13,17 @@ struct RootTerminalView: View {
     private let blockedKeywords = ["exploit", "inject", "frida", "bypass", "crack", "hook"]
 
     private var outputText: String {
-        if shell.output.isEmpty {
-            return "尚未连接。点击「连接」启动本机授权 root shell。\n\n提示：本功能需要越狱或 TrollStore 环境（带 no-sandbox 权限）。\n输入 exit 可退出。"
+        if shell.isRunning || shell.output.isEmpty {
+            if shell.output.isEmpty {
+                if let error = shell.state.lastError, !error.isEmpty {
+                    return error
+                }
+                return "尚未连接。点击「连接」启动本机授权 root shell。\n\n提示：本功能需要越狱或 TrollStore 环境（带 no-sandbox 权限）。\n输入 exit 可退出。"
+            }
+            return shell.output
+        }
+        if let error = shell.state.lastError, !error.isEmpty {
+            return error
         }
         return shell.output
     }
