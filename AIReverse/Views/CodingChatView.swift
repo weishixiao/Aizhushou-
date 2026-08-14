@@ -27,8 +27,8 @@ struct CodingChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            messageList
             executionProgressPanel
+            messageList
             uploadStatusBar
             modelSwitcher
             inputBar
@@ -189,19 +189,14 @@ struct CodingChatView: View {
     private var executionProgressPanel: some View {
         Group {
             if agent.isWorking || agent.pendingTask != nil {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
                             .tint(accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(agent.stageText ?? agent.pendingTask?.currentStage ?? "等待输入")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.primary)
-                            Text(agent.isWorking ? "AI 正在执行任务" : "上次任务已保留，点击恢复继续")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                        }
+                        Text("执行过程")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
                         Spacer()
                         if !agent.isWorking, agent.pendingTask != nil {
                             Button {
@@ -242,6 +237,11 @@ struct CodingChatView: View {
                                 }
                             }
                         }
+                    } else if let currentStage = agent.stageText ?? agent.pendingTask?.currentStage {
+                        Text(currentStage)
+                            .font(.caption)
+                            .foregroundColor(.primary)
+                            .lineLimit(2)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -252,7 +252,7 @@ struct CodingChatView: View {
                         .stroke(accent.opacity(0.12), lineWidth: 1)
                 )
                 .padding(.horizontal, 12)
-                .padding(.top, 8)
+                .padding(.vertical, 8)
             }
         }
     }

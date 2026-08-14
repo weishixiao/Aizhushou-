@@ -39,8 +39,9 @@ Entries discovered by the Agent during task execution should follow this format:
   - Current workspace container does not provide `swift` or `xcodebuild`; local Swift typecheck and Xcode build verification are unavailable here.
   - Validate iOS builds on a Mac/Xcode environment or through the existing GitHub Actions workflow.
 
-[Confirm Before Packaging]
+[Confirm Before Commit And Packaging]
 - Date: 2026-08-14
-- Context: User instructed during IPA build workflow collaboration
+- Context: User instructed during IPA build workflow collaboration and corrected commit workflow
 - Instructions:
+  - Before every git commit, ask the user for explicit confirmation.
   - Before pushing changes that trigger IPA packaging or starting a packaging workflow, ask the user to confirm whether any further changes are needed.

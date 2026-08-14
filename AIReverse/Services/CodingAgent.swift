@@ -173,7 +173,7 @@ final class CodingAgent: ObservableObject {
                 if isCancelled { break }
 
                 await MainActor.run {
-                    updateStage("等待模型回复", model: model, prompt: userText)
+                    updateStage("分析任务上下文", model: model, prompt: userText)
                 }
                 let reply = try await client.chat(
                     model: model,
