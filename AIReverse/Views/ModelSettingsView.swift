@@ -43,7 +43,7 @@ struct ModelSettingsView: View {
                 }
             }
 
-            Section("运行配置") {
+            Section {
                 NavigationLink {
                     AIEnvironmentSettingsView()
                 } label: {
@@ -55,6 +55,8 @@ struct ModelSettingsView: View {
                 } label: {
                     Label("终端配置文件", systemImage: "terminal")
                 }
+            } header: {
+                Text("运行配置")
             } footer: {
                 Text("这些配置只保存到 App 本地，用于给 AI 执行任务时提供上下文。不会读取当前运行环境中的平台 API Key。")
             }
@@ -173,7 +175,7 @@ struct AIEnvironmentSettingsView: View {
 
     var body: some View {
         Form {
-            Section("变量名") {
+            Section {
                 TextField("API Key 变量名", text: $apiKeyName)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
@@ -183,15 +185,19 @@ struct AIEnvironmentSettingsView: View {
                 TextField("模型变量名", text: $modelName)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+            } header: {
+                Text("变量名")
             } footer: {
                 Text("只配置项目内使用的变量名，由你在 App 内主动填写或引用。")
             }
 
-            Section("额外环境变量") {
+            Section {
                 TextEditor(text: $extraVariables)
                     .font(.system(.body, design: .monospaced))
                     .frame(minHeight: 140)
                     .autocorrectionDisabled()
+            } header: {
+                Text("额外环境变量")
             } footer: {
                 Text("每行一个变量，例如 PROJECT_ENV=development。请勿粘贴不需要保存的敏感信息。")
             }
@@ -208,22 +214,26 @@ struct TerminalProfileSettingsView: View {
 
     var body: some View {
         Form {
-            Section("基础配置") {
+            Section {
                 TextField("Shell 路径", text: $shellPath)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                 TextField("工作目录", text: $workingDirectory)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+            } header: {
+                Text("基础配置")
             } footer: {
                 Text("工作目录留空时使用当前仓库工作区。")
             }
 
-            Section("初始化脚本") {
+            Section {
                 TextEditor(text: $profileContent)
                     .font(.system(.body, design: .monospaced))
                     .frame(minHeight: 180)
                     .autocorrectionDisabled()
+            } header: {
+                Text("初始化脚本")
             } footer: {
                 Text("用于记录终端初始化命令和环境说明，AI 可将其作为执行任务前的上下文。")
             }
