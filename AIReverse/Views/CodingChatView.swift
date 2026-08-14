@@ -28,6 +28,7 @@ struct CodingChatView: View {
         VStack(spacing: 0) {
             messageList
             uploadStatusBar
+            modelSwitcher
             inputBar
         }
         .background(backgroundColor.ignoresSafeArea())
@@ -233,6 +234,72 @@ struct CodingChatView: View {
     }
 
     // MARK: - 输入区
+
+    private var modelSwitcher: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(accent)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("当前模型")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text(selectedModelTitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            if modelStore.models.isEmpty {
+                Button {
+                    showModelSettings = true
+                } label: {
+                    Label("添加模型", systemImage: "plus.circle")
+                        .font(.caption)
+                        .foregroundColor(accent)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Menu {
+                    ForEach(modelStore.models) { model in
+                        Button {
+                            modelStore.select(model.id)
+                        } label: {
+                            Label(model.name, systemImage: modelStore.selectedModel?.id == model.id ? "checkmark.circle.fill" : "circle")
+                        }
+                    }
+
+                    Button {
+                        showModelSettings = true
+                    } label: {
+                        Label("管理模型", systemImage: "slider.horizontal.3")
+                    }
+                } label: {
+                    Label("切换", systemImage: "chevron.up.chevron.down")
+                        .font(.caption)
+                        .foregroundColor(agent.isWorking ? .secondary : accent)
+                }
+                .disabled(agent.isWorking)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(backgroundColor)
+        .overlay(
+            Rectangle()
+                .fill(Color.black.opacity(0.05))
+                .frame(height: 1),
+            alignment: .top
+        )
+    }
+
+    private var selectedModelTitle: String {
+        guard let model = modelStore.selectedModel else { return "未配置模型" }
+        return "\(model.name) · \(model.modelID)"
+    }
 
     private var inputBar: some View {
         HStack(alignment: .bottom, spacing: 8) {
