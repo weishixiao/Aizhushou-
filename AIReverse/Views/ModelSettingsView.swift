@@ -162,6 +162,9 @@ struct ModelEditView: View {
     @State private var isTesting = false
     @State private var testResult: String?
     @State private var showTestAlert = false
+    @State private var isLoadingModels = false
+    @State private var availableModels: [LLMModelInfo] = []
+    @State private var modelLoadMessage: String?
 
     private let client = LLMClient()
 
@@ -182,6 +185,55 @@ struct ModelEditView: View {
                 Section("模型名") {
                     TextField("deepseek-chat", text: $modelID)
                         .autocorrectionDisabled()
+                }
+                Section {
+                    Button {
+                        loadAvailableModels()
+                    } label: {
+                        if isLoadingModels {
+                            HStack {
+                                ProgressView()
+                                Text("识别中...")
+                            }
+                        } else {
+                            Label("自动识别模型", systemImage: "wand.and.stars")
+                        }
+                    }
+                    .disabled(isLoadingModels || baseURL.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                    if let modelLoadMessage {
+                        Text(modelLoadMessage)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    ForEach(availableModels) { item in
+                        Button {
+                            modelID = item.id
+                            if name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                name = preferredModelName(item)
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.displayName)
+                                        .foregroundColor(.primary)
+                                    Text(modelMetaText(item))
+                                        .font(.caption2)
+                                        .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                if modelID == item.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.blue)
+                                }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("模型识别")
+                } footer: {
+                    Text("使用 OpenAI 兼容的 GET /v1/models 读取中转站可用模型，选择后自动填入模型名。")
                 }
                 Section {
                     Button {
@@ -273,5 +325,39 @@ struct ModelEditView: View {
                 }
             }
         }
+    }
+
+    private func loadAvailableModels() {
+        guard !isLoadingModels else { return }
+        isLoadingModels = true
+        modelLoadMessage = nil
+        availableModels = []
+        Task {
+            do {
+                let models = try await client.listModels(baseURL: baseURL, apiKey: apiKey)
+                await MainActor.run {
+                    availableModels = models
+                    modelLoadMessage = models.isEmpty ? "未识别到可用模型" : "已识别 \(models.count) 个模型"
+                    isLoadingModels = false
+                }
+            } catch {
+                await MainActor.run {
+                    modelLoadMessage = "识别失败：\(error.localizedDescription)"
+                    isLoadingModels = false
+                }
+            }
+        }
+    }
+
+    private func modelMetaText(_ item: LLMModelInfo) -> String {
+        var parts: [String] = []
+        if let ownedBy = item.ownedBy, !ownedBy.isEmpty { parts.append(ownedBy) }
+        if let status = item.status, !status.isEmpty { parts.append(status) }
+        return parts.isEmpty ? "可用模型" : parts.joined(separator: " · ")
+    }
+
+    private func preferredModelName(_ item: LLMModelInfo) -> String {
+        if let name = item.name, !name.isEmpty { return name }
+        return item.id
     }
 }

@@ -8,6 +8,18 @@ enum LLMReply {
     case toolCalls([ToolCall])
 }
 
+struct LLMModelInfo: Identifiable, Equatable {
+    let id: String
+    let name: String?
+    let ownedBy: String?
+    let status: String?
+
+    var displayName: String {
+        if let name, !name.isEmpty, name != id { return "\(name) · \(id)" }
+        return id
+    }
+}
+
 /// OpenAI 兼容的 LLM 聊天客户端。
 /// 支持任何符合 /v1/chat/completions 接口的服务（DeepSeek、OpenAI、Kimi、本地 Ollama 等），
 /// 通过 AIModelConfig 自定义 Base URL / API Key / 模型名。
@@ -105,6 +117,45 @@ final class LLMClient {
         return .text(content)
     }
 
+    func listModels(baseURL: String, apiKey: String) async throws -> [LLMModelInfo] {
+        let endpoint = try modelsURL(baseURL)
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        }
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw LLMError.network(error)
+        }
+        guard let http = response as? HTTPURLResponse else {
+            throw LLMError.network(URLError(.badServerResponse))
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw LLMError.badStatus(http.statusCode, String(msg.prefix(500)))
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let items = json["data"] as? [[String: Any]] else {
+            throw LLMError.emptyResponse
+        }
+
+        return items.compactMap { item in
+            guard let id = item["id"] as? String, !id.isEmpty else { return nil }
+            return LLMModelInfo(
+                id: id,
+                name: item["name"] as? String,
+                ownedBy: item["owned_by"] as? String,
+                status: item["status"] as? String
+            )
+        }
+    }
+
     /// 发送带工具结果的下一轮请求
     func chat(model: AIModelConfig, messages: [ChatMessage]) async throws -> String {
         guard model.isFilled else { throw LLMError.emptyConfig }
@@ -139,6 +190,17 @@ final class LLMClient {
         } else {
             endpoint = baseURL + "/v1/chat/completions"
         }
+        guard let url = URL(string: endpoint) else { throw LLMError.invalidURL }
+        return url
+    }
+
+    private func modelsURL(_ rawBaseURL: String) throws -> URL {
+        var baseURL = rawBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if baseURL.hasSuffix("/") { baseURL.removeLast() }
+        if baseURL.hasSuffix("/chat/completions") {
+            baseURL = String(baseURL.dropLast("/chat/completions".count))
+        }
+        let endpoint = baseURL.hasSuffix("/v1") ? baseURL + "/models" : baseURL + "/v1/models"
         guard let url = URL(string: endpoint) else { throw LLMError.invalidURL }
         return url
     }

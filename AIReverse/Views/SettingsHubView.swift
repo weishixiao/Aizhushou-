@@ -14,6 +14,17 @@ struct SettingsHubView: View {
                         subtitle: "配置 API、模型名称与连接测试"
                     )
                 }
+
+                NavigationLink {
+                    MCPSettingsView()
+                } label: {
+                    featureRow(
+                        icon: "point.3.connected.trianglepath.dotted",
+                        color: .purple,
+                        title: "MCP 集成",
+                        subtitle: "添加服务器、导入 mcpServers JSON"
+                    )
+                }
             }
         }
         .navigationTitle("设置")
