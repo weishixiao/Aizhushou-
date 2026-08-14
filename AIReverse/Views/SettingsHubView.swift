@@ -27,7 +27,7 @@ struct SettingsHubView: View {
                 }
             }
 
-            Section("授权工具") {
+            Section {
                 NavigationLink {
                     RootTerminalView()
                 } label: {
@@ -49,6 +49,8 @@ struct SettingsHubView: View {
                         subtitle: "浏览设备文件系统、查看文件属性"
                     )
                 }
+            } header: {
+                Text("授权工具")
             } footer: {
                 Text("仅用于你拥有或已获得明确授权的设备环境。应用不会提供提权、绕过保护或注入能力。")
             }

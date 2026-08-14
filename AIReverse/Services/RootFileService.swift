@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// RootFS 目录浏览条目
 struct RootFileEntry: Identifiable, Equatable {
@@ -50,7 +51,7 @@ final class RootFileService {
     /// 列出目录内容，目录优先，按名称排序
     func listDirectory(at path: String) throws -> [RootFileEntry] {
         let url = URL(fileURLWithPath: path)
-        let keys: [URLResourceKey] = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .isSymbolicLinkKey, .posixPermissionsKey]
+        let keys: [URLResourceKey] = [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey, .isSymbolicLinkKey]
         let children: [URL]
         do {
             children = try fm.contentsOfDirectory(at: url, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles])
@@ -62,7 +63,6 @@ final class RootFileService {
             let values = try? child.resourceValues(forKeys: Set(keys))
             let isDir = values?.isDirectory ?? false
             let isLink = values?.isSymbolicLink ?? false
-            let perms = Self.permissionString(values?.posixPermissions?.intValue ?? 0)
             return RootFileEntry(
                 id: child.path,
                 name: child.lastPathComponent.isEmpty ? child.path : child.lastPathComponent,
@@ -70,7 +70,7 @@ final class RootFileService {
                 isDirectory: isDir,
                 size: values?.fileSize?.int64Value ?? 0,
                 modificationDate: values?.contentModificationDate,
-                permissions: perms,
+                permissions: Self.permissionString(for: child.path),
                 isSymlink: isLink
             )
         }
@@ -114,7 +114,7 @@ final class RootFileService {
     }
 
     private func isControlCharacter(_ scalar: Unicode.Scalar) -> Bool {
-        if scalar == "\n" || scalar == "\r" || scalar == "\t" { return false }
+        if scalar.value == 0x0A || scalar.value == 0x0D || scalar.value == 0x09 { return false }
         return scalar.value < 0x20 || scalar.value == 0x7F
     }
 
@@ -130,17 +130,20 @@ final class RootFileService {
                 let c = Character(UnicodeScalar(byte))
                 return (byte >= 0x20 && byte < 0x7F) ? c : "."
             }
-            lines.append(String(format: "%08x  %-47s  %@", offset, hex, String(ascii)))
+            let hexPadded = hex.padding(toLength: 47, withPad: " ", startingAt: 0)
+            let line = String(format: "%08x  %@  %@", offset, hexPadded, String(ascii))
+            lines.append(line)
             offset += 16
         }
         return lines.joined(separator: "\n")
     }
 
-    /// 将 POSIX 权限数值转换为 rwx 字符串
-    private static func permissionString(_ mode: Int) -> String {
-        guard mode != 0 else { return "" }
+    /// 将 POSIX 权限数值转换为 rwx 字符串（iOS 无 posixPermissions 资源键，用 lstat 获取）
+    private static func permissionString(for path: String) -> String {
+        var st = stat()
+        guard lstat(path, &st) == 0 else { return "" }
+        let m = Int(st.st_mode) & 0o777
         var out = ""
-        let m = Int(mode)
         out += m & 0o400 != 0 ? "r" : "-"
         out += m & 0o200 != 0 ? "w" : "-"
         out += m & 0o100 != 0 ? "x" : "-"

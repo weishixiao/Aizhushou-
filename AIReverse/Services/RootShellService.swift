@@ -97,43 +97,46 @@ final class RootShellService: ObservableObject {
             return false
         }
 
-        let pid = fork()
-        if pid < 0 {
+        setenv("TERM", "xterm-256color", 1)
+        setenv("HOME", workingDirectory, 1)
+        setenv("SHELL", shell, 1)
+        setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/usr/bin", 1)
+
+        var actions = posix_spawn_file_actions_t()
+        posix_spawn_file_actions_init(&actions)
+        posix_spawn_file_actions_adddup2(&actions, slave, STDIN_FILENO)
+        posix_spawn_file_actions_adddup2(&actions, slave, STDOUT_FILENO)
+        posix_spawn_file_actions_adddup2(&actions, slave, STDERR_FILENO)
+        if slave > STDERR_FILENO {
+            posix_spawn_file_actions_addclose(&actions, slave)
+        }
+
+        var attr = posix_spawnattr_t()
+        posix_spawnattr_init(&attr)
+        posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID))
+
+        var pid: pid_t = 0
+        let pathC = strdup(shell)
+        let argv: [UnsafeMutablePointer<CChar>?] = [
+            pathC,
+            strdup("-i"),
+            nil
+        ]
+        let spawnResult = argv.withUnsafeBufferPointer { argvPtr -> Int32 in
+            posix_spawn(&pid, shell, &actions, &attr, argvPtr.baseAddress, nil)
+        }
+
+        posix_spawn_file_actions_destroy(&actions)
+        posix_spawnattr_destroy(&attr)
+        close(slave)
+
+        if spawnResult != 0 {
+            free(pathC)
             close(master)
-            close(slave)
-            state.lastError = "fork 失败：\(String(cString: strerror(errno)))"
+            state.lastError = "posix_spawn 失败：\(String(cString: strerror(spawnResult)))"
             return false
         }
 
-        if pid == 0 {
-            // 子进程：挂载 PTY 为控制终端并执行 shell
-            setsid()
-            ioctl(slave, TIOCSCTTY, 0)
-            dup2(slave, STDIN_FILENO)
-            dup2(slave, STDOUT_FILENO)
-            dup2(slave, STDERR_FILENO)
-            if slave > STDERR_FILENO {
-                close(slave)
-            }
-            close(master)
-
-            setenv("TERM", "xterm-256color", 1)
-            setenv("HOME", workingDirectory, 1)
-            setenv("SHELL", shell, 1)
-            setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/usr/bin", 1)
-            chdir(workingDirectory)
-
-            var argv: [UnsafeMutablePointer<CChar>?] = [
-                strdup(shell),
-                strdup("-i"),
-                nil
-            ]
-            execv(shell, &argv)
-            _exit(127)
-        }
-
-        // 父进程
-        close(slave)
         masterFD = master
         childPID = pid
         state = ShellState(running: true, lastError: nil)
