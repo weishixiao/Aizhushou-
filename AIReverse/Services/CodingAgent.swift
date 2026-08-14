@@ -26,7 +26,7 @@ final class CodingAgent: ObservableObject {
     @Published var errorMessage: String?
     @Published var stageText: String?
 
-    var repoConfig = GitRepoConfig()
+    var repoConfig = GitRepoConfig.load()
     private(set) var workspace: WorkspaceManager
     private let github = GitHubAPIClient()
     private let registry = ToolRegistry()
@@ -149,9 +149,11 @@ final class CodingAgent: ObservableObject {
                 }
             }
         } catch {
-            await MainActor.run {
-                errorMessage = error.localizedDescription
-                stageText = "请求失败"
+            if !isCancelled {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    stageText = "请求失败"
+                }
             }
         }
 
@@ -164,6 +166,12 @@ final class CodingAgent: ObservableObject {
     func cancel() {
         isCancelled = true
         Task { @MainActor in
+            if isWorking {
+                messages.append(ChatMessage(role: .assistant, content: "已停止当前回复。"))
+                saveConversation()
+            }
+            isWorking = false
+            stageText = nil
             endBackgroundTask(backgroundTaskID)
         }
     }
@@ -172,6 +180,11 @@ final class CodingAgent: ObservableObject {
     func setWorkspace(_ url: URL) {
         try? workspace.setWorkspace(url)
         tracker.bind(to: workspace)
+    }
+
+    func updateRepoConfig(_ update: (inout GitRepoConfig) -> Void) {
+        update(&repoConfig)
+        repoConfig.save()
     }
 
     func resetConversation() {

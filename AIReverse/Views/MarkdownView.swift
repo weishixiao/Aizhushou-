@@ -173,7 +173,7 @@ struct CodeBlockView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(language.isEmpty ? "code" : language)
+                Text(language.isEmpty ? "代码" : language)
                     .font(.caption2)
                     .foregroundColor(.white.opacity(0.6))
                 Spacer()
@@ -198,7 +198,6 @@ struct CodeBlockView: View {
                     .font(.system(.footnote, design: .monospaced))
                     .foregroundColor(.white)
                     .padding(10)
-                    .textSelection(.enabled)
             }
         }
         .background(Color(red: 0.11, green: 0.12, blue: 0.16))
@@ -207,6 +206,13 @@ struct CodeBlockView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = code
+            } label: {
+                Label("复制代码", systemImage: "doc.on.doc")
+            }
+        }
     }
 }
 
@@ -230,12 +236,10 @@ struct MarkdownView: View {
             InlineText(text: text)
                 .font(.system(size: 14))
                 .lineSpacing(4)
-                .textSelection(.enabled)
         case .heading(let level, let text):
             InlineText(text: text)
                 .font(.system(size: level == 1 ? 17 : level == 2 ? 15 : 13, weight: .bold))
                 .lineSpacing(2)
-                .textSelection(.enabled)
         case .code(let language, let code):
             CodeBlockView(language: language, code: code)
         case .listItem(let level, let text):
@@ -245,7 +249,6 @@ struct MarkdownView: View {
                 InlineText(text: text)
                     .font(.system(size: 14))
                     .lineSpacing(3)
-                    .textSelection(.enabled)
             }
             .padding(.leading, CGFloat(level) * 12)
         case .quote(let text):
@@ -306,7 +309,6 @@ struct ToolCallCardView: View {
                 Text(preview)
                     .font(.system(.caption2, design: .monospaced))
                     .foregroundColor(card.status == .failed ? .red : .primary)
-                    .textSelection(.enabled)
             }
         }
         .padding(12)

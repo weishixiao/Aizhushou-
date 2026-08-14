@@ -57,11 +57,12 @@ final class WorkspaceManager: ObservableObject {
     @Published private(set) var workspaceRoot: URL?
 
     static let workspaceSubdir = "Workspace"
+    private static let workspaceRootKey = "workspace_root_path"
 
     private let fileManager = FileManager.default
 
     init() {
-        workspaceRoot = defaultRoot()
+        workspaceRoot = savedRoot() ?? defaultRoot()
         try? ensureWorkspaceExists()
     }
 
@@ -94,6 +95,18 @@ final class WorkspaceManager: ObservableObject {
             throw WorkspaceError.notFound(dir.path)
         }
         workspaceRoot = dir.standardizedFileURL
+        UserDefaults.standard.set(dir.standardizedFileURL.path, forKey: Self.workspaceRootKey)
+    }
+
+    private func savedRoot() -> URL? {
+        guard let path = UserDefaults.standard.string(forKey: Self.workspaceRootKey), !path.isEmpty else {
+            return nil
+        }
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue else {
+            return nil
+        }
+        return URL(fileURLWithPath: path).standardizedFileURL
     }
 
     /// 解析相对路径为工作区内的绝对 URL，拒绝路径逃逸。

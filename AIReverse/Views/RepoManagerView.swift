@@ -30,7 +30,10 @@ struct RepoManagerView: View {
                 }
                 .onChange(of: platform) { newValue in
                     branch = newValue.defaultBranch
-                    agent.repoConfig.platform = newValue
+                    agent.updateRepoConfig { config in
+                        config.platform = newValue
+                        config.branch = branch
+                    }
                 }
             }
 
@@ -152,10 +155,12 @@ struct RepoManagerView: View {
         showImportProgress = true
 
         // 暂存配置以便 git 工具使用
-        agent.repoConfig.repo = repo
-        agent.repoConfig.token = tk
-        agent.repoConfig.branch = branch
-        agent.repoConfig.platform = platform
+        agent.updateRepoConfig { config in
+            config.repo = repo
+            config.token = tk
+            config.branch = branch
+            config.platform = platform
+        }
         github.platform = platform
 
         do {
@@ -165,7 +170,9 @@ struct RepoManagerView: View {
                 branches = list
                 if !list.contains(branch) {
                     branch = list.first ?? "main"
-                    agent.repoConfig.branch = branch
+                    agent.updateRepoConfig { config in
+                        config.branch = branch
+                    }
                 }
             }
             // 递归下载仓库内容到工作区根目录
@@ -183,6 +190,7 @@ struct RepoManagerView: View {
                 repoURL = repo
                 token = tk
                 branch = agent.repoConfig.branch
+                agent.repoConfig.save()
                 importError = "仓库导入成功，下载 \(downloaded) 个文本文件到工作区。可以开始与 AI 对话。"
             }
             agent.resetConversation()

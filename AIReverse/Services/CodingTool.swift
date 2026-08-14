@@ -19,7 +19,7 @@ protocol CodingTool {
 }
 
 /// 仓库配置：远程地址 + Token + 当前分支 + 平台
-struct GitRepoConfig {
+struct GitRepoConfig: Codable, Equatable {
     var repo: String = ""
     var token: String = ""
     var branch: String = "main"
@@ -27,6 +27,21 @@ struct GitRepoConfig {
 
     var hasRemote: Bool {
         !repo.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private static let storageKey = "git_repo_config"
+
+    static func load() -> GitRepoConfig {
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let config = try? JSONDecoder().decode(GitRepoConfig.self, from: data) else {
+            return GitRepoConfig()
+        }
+        return config
+    }
+
+    func save() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: Self.storageKey)
     }
 }
 

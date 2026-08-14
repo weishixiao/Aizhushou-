@@ -13,7 +13,9 @@ struct CodingChatView: View {
     @State private var showModelSettings = false
     @State private var showUploadPicker = false
     @State private var uploadedFileName: String?
+    @State private var uploadedFileURL: URL?
     @State private var uploadError: String?
+    @State private var sendTask: Task<Void, Never>?
 
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
     private let packageExtensions: Set<String> = ["ipa", "tipa", "deb", "dylib", "apk"]
@@ -143,6 +145,15 @@ struct CodingChatView: View {
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                     Spacer()
+                    Button {
+                        removeUploadedFile()
+                    } label: {
+                        Label("删除", systemImage: "xmark.circle.fill")
+                            .labelStyle(.titleAndIcon)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
@@ -267,19 +278,22 @@ struct CodingChatView: View {
                     .stroke(Color.black.opacity(0.08), lineWidth: 1)
             )
 
-            // 绿色圆形发送按钮
             Button {
-                sendInput()
+                if agent.isWorking {
+                    stopConversation()
+                } else {
+                    sendInput()
+                }
             } label: {
-                Image(systemName: "arrow.up")
+                Image(systemName: agent.isWorking ? "stop.fill" : "arrow.up")
                     .font(.system(size: 17, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 40, height: 40)
-                    .background(inputText.trimmingCharacters(in: .whitespaces).isEmpty || agent.isWorking ? Color(.systemGray4) : accent)
+                    .background(sendButtonColor)
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty || agent.isWorking)
+            .disabled(!agent.isWorking && inputText.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -294,20 +308,33 @@ struct CodingChatView: View {
 
     // MARK: - Actions
 
+    private var sendButtonColor: Color {
+        if agent.isWorking { return .red }
+        if inputText.trimmingCharacters(in: .whitespaces).isEmpty { return Color(.systemGray4) }
+        return accent
+    }
+
     private func sendInput() {
         send(inputText)
         inputText = ""
     }
 
+    private func stopConversation() {
+        sendTask?.cancel()
+        sendTask = nil
+        agent.cancel()
+    }
+
     private func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !agent.isWorking else { return }
-        Task {
+        sendTask = Task { @MainActor in
             guard let model = modelStore.selectedModel else {
                 agent.errorMessage = "请先在设置中添加并选择模型"
                 return
             }
             await agent.send(trimmed, model: model)
+            sendTask = nil
         }
     }
 
@@ -323,17 +350,29 @@ struct CodingChatView: View {
         guard packageExtensions.contains(ext) else {
             uploadError = "仅支持上传 .ipa、.tipa、.deb、.dylib、.apk 文件"
             uploadedFileName = nil
+            uploadedFileURL = nil
             return
         }
         do {
             let savedURL = try saveUploadedPackage(url)
             uploadedFileName = savedURL.lastPathComponent
+            uploadedFileURL = savedURL
             uploadError = nil
             agent.appendLocalMessage(role: .user, content: "已上传文件：\(savedURL.lastPathComponent)")
         } catch {
             uploadError = "上传失败：\(error.localizedDescription)"
             uploadedFileName = nil
+            uploadedFileURL = nil
         }
+    }
+
+    private func removeUploadedFile() {
+        if let url = uploadedFileURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        uploadedFileName = nil
+        uploadedFileURL = nil
+        uploadError = nil
     }
 
     private func saveUploadedPackage(_ url: URL) throws -> URL {
@@ -371,7 +410,6 @@ struct DocumentMessageRow: View {
                         .padding(.vertical, 9)
                         .background(Color(red: 0.10, green: 0.62, blue: 0.42).opacity(0.12))
                         .cornerRadius(16)
-                        .textSelection(.enabled)
                 }
             } else if message.role == .assistant {
                 // 文档式排版：无气泡背景，直接铺开
@@ -384,7 +422,6 @@ struct DocumentMessageRow: View {
                     .padding(10)
                     .background(Color(.systemGray6))
                     .cornerRadius(10)
-                    .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(message.content)
@@ -394,5 +431,38 @@ struct DocumentMessageRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contextMenu {
+            Button {
+                UIPasteboard.general.string = message.content
+            } label: {
+                Label("复制内容", systemImage: "doc.on.doc")
+            }
+
+            Button {
+                UIPasteboard.general.string = quotedContent
+            } label: {
+                Label("复制为引用", systemImage: "quote.bubble")
+            }
+
+            Button {
+                UIPasteboard.general.string = formattedDate
+            } label: {
+                Label("复制时间", systemImage: "clock")
+            }
+        }
+    }
+
+    private var quotedContent: String {
+        message.content
+            .components(separatedBy: .newlines)
+            .map { "> \($0)" }
+            .joined(separator: "\n")
+    }
+
+    private var formattedDate: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_Hans_CN")
+        formatter.dateFormat = "yyyy年M月d日 HH:mm:ss"
+        return formatter.string(from: message.date)
     }
 }

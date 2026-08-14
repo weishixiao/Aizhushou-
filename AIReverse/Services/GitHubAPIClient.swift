@@ -1,7 +1,7 @@
 import Foundation
 
 /// Git 托管平台
-enum GitPlatform: String, CaseIterable {
+enum GitPlatform: String, CaseIterable, Codable {
     case github
     case gitee
 
