@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 /// 顶部模型信息条 + 文档式消息流 + 圆角输入区
 struct CodingChatView: View {
     @EnvironmentObject var modelStore: ModelStore
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var agent: CodingAgent
 
     @State private var inputText = ""
@@ -27,6 +28,7 @@ struct CodingChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             messageList
+            executionProgressPanel
             uploadStatusBar
             modelSwitcher
             inputBar
@@ -97,6 +99,11 @@ struct CodingChatView: View {
         .onAppear {
             if agent.messages.isEmpty {
                 seedWelcome()
+            }
+        }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active, agent.pendingTask != nil, !agent.isWorking {
+                // 保持恢复提示可见，等待用户点按继续
             }
         }
     }
@@ -175,6 +182,77 @@ struct CodingChatView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
                 .background(Color.white)
+            }
+        }
+    }
+
+    private var executionProgressPanel: some View {
+        Group {
+            if agent.isWorking || agent.pendingTask != nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(agent.stageText ?? agent.pendingTask?.currentStage ?? "等待输入")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.primary)
+                            Text(agent.isWorking ? "AI 正在执行任务" : "上次任务已保留，点击恢复继续")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        if !agent.isWorking, agent.pendingTask != nil {
+                            Button {
+                                resumePendingTask()
+                            } label: {
+                                Text("恢复上次任务")
+                                    .font(.caption)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(accent.opacity(0.12))
+                                    .foregroundColor(accent)
+                                    .cornerRadius(10)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(resumeTargetModel == nil)
+                        }
+                    }
+
+                    if let prompt = agent.pendingTask?.prompt, !prompt.isEmpty, !agent.isWorking {
+                        Text("上次任务：\(prompt)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                    }
+
+                    if !agent.stageHistory.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ForEach(Array(agent.stageHistory.suffix(4).enumerated()), id: \.offset) { index, stage in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text("\(index + 1).")
+                                        .font(.caption2.monospacedDigit())
+                                        .foregroundColor(.secondary)
+                                    Text(stage)
+                                        .font(.caption)
+                                        .foregroundColor(index == agent.stageHistory.suffix(4).count - 1 ? .primary : .secondary)
+                                        .lineLimit(2)
+                                    Spacer()
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Color.white)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(accent.opacity(0.12), lineWidth: 1)
+                )
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
             }
         }
     }
@@ -392,6 +470,22 @@ struct CodingChatView: View {
         sendTask?.cancel()
         sendTask = nil
         agent.cancel()
+    }
+
+    private var resumeTargetModel: AIModelConfig? {
+        guard let pending = agent.pendingTask else { return nil }
+        return modelStore.models.first(where: { $0.id == pending.modelID }) ?? modelStore.selectedModel
+    }
+
+    private func resumePendingTask() {
+        guard let model = resumeTargetModel else {
+            agent.errorMessage = "请先在设置中配置并选择用于恢复的模型"
+            return
+        }
+        sendTask = Task { @MainActor in
+            await agent.resumePendingTask(model: model)
+            sendTask = nil
+        }
     }
 
     private func send(_ text: String) {

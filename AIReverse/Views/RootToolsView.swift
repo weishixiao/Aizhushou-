@@ -13,12 +13,15 @@ struct RootTerminalView: View {
     private let blockedKeywords = ["exploit", "inject", "frida", "bypass", "crack", "hook"]
 
     private var outputText: String {
+        if !RootExecutionEnvironment.supportsRootTools {
+            return "当前设备未开放系统终端能力。请在越狱或授权执行环境中使用。"
+        }
         if shell.isRunning || shell.output.isEmpty {
             if shell.output.isEmpty {
                 if let error = shell.state.lastError, !error.isEmpty {
                     return error
                 }
-                return "尚未连接。点击「连接」启动本机授权 root shell。\n\n提示：本功能需要越狱或 TrollStore 环境（带 no-sandbox 权限）。\n输入 exit 可退出。"
+                return "尚未连接。点击「连接」启动系统 shell。\n\n提示：本功能需要越狱或授权执行环境。\n输入 exit 可退出。"
             }
             return shell.output
         }
@@ -30,11 +33,15 @@ struct RootTerminalView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            connectionBar
-            terminalOutput
-            inputBar
+            if RootExecutionEnvironment.supportsRootTools {
+                connectionBar
+                terminalOutput
+                inputBar
+            } else {
+                unavailableView
+            }
         }
-        .navigationTitle("Root 终端")
+        .navigationTitle("系统终端")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
@@ -55,6 +62,22 @@ struct RootTerminalView: View {
         .onDisappear {
             shell.stop()
         }
+    }
+
+    private var unavailableView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "terminal.fill")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundColor(.secondary)
+            Text("当前设备未开放系统终端能力")
+                .font(.headline)
+            Text("可用时会显示系统终端与系统文件管理入口。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+        .background(Color(red: 0.10, green: 0.11, blue: 0.13))
     }
 
     private var connectionBar: some View {
@@ -99,7 +122,7 @@ struct RootTerminalView: View {
 
     private var statusText: String {
         if shell.isRunning {
-            return "root shell 已连接"
+                return "系统 shell 已连接"
         }
         if let error = shell.state.lastError, !error.isEmpty {
             return error
@@ -191,7 +214,7 @@ struct RootFSManagerView: View {
             pathBar
             content
         }
-        .navigationTitle("RootFS 管理")
+        .navigationTitle("系统文件管理")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $selectedEntry) { entry in
             NavigationView {
