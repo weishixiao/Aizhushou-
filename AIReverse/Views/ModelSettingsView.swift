@@ -42,24 +42,6 @@ struct ModelSettingsView: View {
                     Text("\(model.name) — \(model.modelID)")
                 }
             }
-
-            Section {
-                NavigationLink {
-                    AIEnvironmentSettingsView()
-                } label: {
-                    Label("AI 环境变量", systemImage: "curlybraces.square")
-                }
-
-                NavigationLink {
-                    TerminalProfileSettingsView()
-                } label: {
-                    Label("终端配置文件", systemImage: "terminal")
-                }
-            } header: {
-                Text("运行配置")
-            } footer: {
-                Text("这些配置只保存到 App 本地，用于给 AI 执行任务时提供上下文。不会读取当前运行环境中的平台 API Key。")
-            }
         }
         .navigationTitle("模型设置")
         .toolbar {
@@ -167,82 +149,6 @@ struct ModelSettingsView: View {
     }
 }
 
-struct AIEnvironmentSettingsView: View {
-    @AppStorage("ai_env_api_key_name") private var apiKeyName = "PROJECT_LLM_API_KEY"
-    @AppStorage("ai_env_base_url_name") private var baseURLName = "PROJECT_LLM_BASE_URL"
-    @AppStorage("ai_env_model_name") private var modelName = "PROJECT_LLM_MODEL"
-    @AppStorage("ai_env_extra_variables") private var extraVariables = ""
-
-    var body: some View {
-        Form {
-            Section {
-                TextField("API Key 变量名", text: $apiKeyName)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                TextField("Base URL 变量名", text: $baseURLName)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                TextField("模型变量名", text: $modelName)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-            } header: {
-                Text("变量名")
-            } footer: {
-                Text("只配置项目内使用的变量名，由你在 App 内主动填写或引用。")
-            }
-
-            Section {
-                TextEditor(text: $extraVariables)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 140)
-                    .autocorrectionDisabled()
-            } header: {
-                Text("额外环境变量")
-            } footer: {
-                Text("每行一个变量，例如 PROJECT_ENV=development。请勿粘贴不需要保存的敏感信息。")
-            }
-        }
-        .navigationTitle("AI 环境变量")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-struct TerminalProfileSettingsView: View {
-    @AppStorage("terminal_shell_path") private var shellPath = "/bin/zsh"
-    @AppStorage("terminal_working_directory") private var workingDirectory = ""
-    @AppStorage("terminal_profile_content") private var profileContent = ""
-
-    var body: some View {
-        Form {
-            Section {
-                TextField("Shell 路径", text: $shellPath)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                TextField("工作目录", text: $workingDirectory)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-            } header: {
-                Text("基础配置")
-            } footer: {
-                Text("工作目录留空时使用当前仓库工作区。")
-            }
-
-            Section {
-                TextEditor(text: $profileContent)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 180)
-                    .autocorrectionDisabled()
-            } header: {
-                Text("初始化脚本")
-            } footer: {
-                Text("用于记录终端初始化命令和环境说明，AI 可将其作为执行任务前的上下文。")
-            }
-        }
-        .navigationTitle("终端配置文件")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 /// 模型编辑表单
 struct ModelEditView: View {
     let model: AIModelConfig?
@@ -266,7 +172,7 @@ struct ModelEditView: View {
                     TextField("例如：DeepSeek", text: $name)
                 }
                 Section("接口地址") {
-                    TextField("https://api.deepseek.com", text: $baseURL)
+                    TextField("", text: $baseURL)
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
                 }

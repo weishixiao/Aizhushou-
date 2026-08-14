@@ -226,61 +226,9 @@ final class CodingAgent: ObservableObject {
         if let packageScanSummary, !packageScanSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             systemPrompt += "\n\n用户最近上传文件的本地静态扫描摘要：\n\(truncate(packageScanSummary, limit: 5000))"
         }
-        systemPrompt += runtimeConfigurationContext()
         history.append(ChatMessage(role: .system, content: systemPrompt))
         history.append(contentsOf: messages)
         return history
-    }
-
-    private func runtimeConfigurationContext() -> String {
-        let defaults = UserDefaults.standard
-        var lines: [String] = []
-
-        let apiKeyName = defaults.string(forKey: "ai_env_api_key_name") ?? "PROJECT_LLM_API_KEY"
-        let baseURLName = defaults.string(forKey: "ai_env_base_url_name") ?? "PROJECT_LLM_BASE_URL"
-        let modelName = defaults.string(forKey: "ai_env_model_name") ?? "PROJECT_LLM_MODEL"
-        lines.append("AI 环境变量名：\(apiKeyName)、\(baseURLName)、\(modelName)")
-
-        let extraNames = configuredEnvironmentNames(from: defaults.string(forKey: "ai_env_extra_variables") ?? "")
-        if !extraNames.isEmpty {
-            lines.append("额外环境变量名：\(extraNames.joined(separator: "、"))")
-        }
-
-        let shellPath = defaults.string(forKey: "terminal_shell_path") ?? "/bin/zsh"
-        let workdir = defaults.string(forKey: "terminal_working_directory") ?? ""
-        lines.append("终端 Shell：\(shellPath)")
-        if !workdir.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            lines.append("终端工作目录：\(workdir)")
-        }
-
-        let profile = defaults.string(forKey: "terminal_profile_content") ?? ""
-        if !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            lines.append("终端初始化说明：\n\(redactSensitiveAssignments(in: profile))")
-        }
-
-        guard !lines.isEmpty else { return "" }
-        return "\n\n本地运行配置：\n" + lines.map { "- \($0)" }.joined(separator: "\n")
-    }
-
-    private func configuredEnvironmentNames(from text: String) -> [String] {
-        text.components(separatedBy: .newlines).compactMap { line in
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            return trimmed.components(separatedBy: "=").first?.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-    }
-
-    private func redactSensitiveAssignments(in text: String) -> String {
-        text.components(separatedBy: .newlines).map { line in
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let separatorIndex = trimmed.firstIndex(of: "=") else { return line }
-
-            let key = String(trimmed[..<separatorIndex]).replacingOccurrences(of: "export ", with: "")
-            if key.range(of: #"(?i)(key|token|secret|password|passwd|credential|auth)"#, options: .regularExpression) != nil {
-                return "\(key)=[已脱敏]"
-            }
-            return line
-        }.joined(separator: "\n")
     }
 
     private func upsertToolCard(_ call: ToolCall, status: ToolCallStatus, result: String? = nil) {
