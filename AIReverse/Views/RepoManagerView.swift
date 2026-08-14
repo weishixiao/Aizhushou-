@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// 仓库管理：打开本地目录 / 导入 GitHub 仓库 / 分支与身份配置
+/// 仓库管理：打开本地目录 / 导入 GitHub 仓库 / 分支配置
 struct RepoManagerView: View {
     @ObservedObject var agent: CodingAgent
 
@@ -9,8 +9,6 @@ struct RepoManagerView: View {
     @State private var repoURL = ""
     @State private var token = ""
     @State private var branch = "main"
-    @State private var gitUserName = UserDefaults.standard.string(forKey: "git_user_name") ?? ""
-    @State private var gitUserEmail = UserDefaults.standard.string(forKey: "git_user_email") ?? ""
     @State private var showDocumentPicker = false
     @State private var showImportProgress = false
     @State private var importError: String?
@@ -20,6 +18,10 @@ struct RepoManagerView: View {
 
     var body: some View {
         Form {
+            Section("当前连接") {
+                connectionStatus
+            }
+
             Section {
                 Picker("平台", selection: $platform) {
                     ForEach(GitPlatform.allCases, id: \.self) { p in
@@ -77,20 +79,6 @@ struct RepoManagerView: View {
                 }
             }
 
-            Section("提交身份") {
-                TextField("用户名", text: $gitUserName)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                TextField("邮箱", text: $gitUserEmail)
-                    .keyboardType(.emailAddress)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
-                Button("保存身份") {
-                    UserDefaults.standard.set(gitUserName, forKey: "git_user_name")
-                    UserDefaults.standard.set(gitUserEmail, forKey: "git_user_email")
-                }
-            }
-
             Section("安全") {
                 Toggle("允许 AI 修改代码并提交", isOn: $agent.allowMutating)
                     .tint(.blue)
@@ -111,9 +99,9 @@ struct RepoManagerView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             platform = agent.repoConfig.platform
-            if branch.isEmpty {
-                branch = platform.defaultBranch
-            }
+            repoURL = agent.repoConfig.repo
+            token = agent.repoConfig.token
+            branch = agent.repoConfig.branch.isEmpty ? platform.defaultBranch : agent.repoConfig.branch
         }
         .sheet(isPresented: $showDocumentPicker) {
             DocumentPicker(onPick: { url in
@@ -121,6 +109,38 @@ struct RepoManagerView: View {
                 try? agent.workspace.ensureWorkspaceExists()
                 agent.resetConversation()
             })
+        }
+    }
+
+    @ViewBuilder
+    private var connectionStatus: some View {
+        if agent.repoConfig.hasRemote {
+            statusRow(title: "平台", value: agent.repoConfig.platform.displayName, icon: "checkmark.seal.fill", color: .green)
+            statusRow(title: "仓库", value: agent.repoConfig.repo, icon: "link", color: .blue)
+            statusRow(title: "分支", value: agent.repoConfig.branch, icon: "arrow.triangle.branch", color: .blue)
+        } else {
+            statusRow(title: "远端仓库", value: "未连接", icon: "exclamationmark.circle", color: .orange)
+        }
+
+        if let root = agent.workspace.workspaceRoot {
+            statusRow(title: "本地工作区", value: root.path, icon: "folder", color: .secondary)
+        }
+    }
+
+    private func statusRow(title: String, value: String, icon: String, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .foregroundColor(color)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text(value.isEmpty ? "未设置" : value)
+                    .font(.footnote)
+                    .foregroundColor(.primary)
+                    .textSelection(.enabled)
+            }
         }
     }
 
@@ -160,6 +180,9 @@ struct RepoManagerView: View {
             try tracker.saveSnapshot(snapshot)
 
             await MainActor.run {
+                repoURL = repo
+                token = tk
+                branch = agent.repoConfig.branch
                 importError = "仓库导入成功，下载 \(downloaded) 个文本文件到工作区。可以开始与 AI 对话。"
             }
             agent.resetConversation()

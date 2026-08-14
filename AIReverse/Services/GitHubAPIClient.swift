@@ -397,9 +397,7 @@ final class GitHubAPIClient {
     }
 
     private func gitIdentity() async -> (name: String, email: String) {
-        let name = UserDefaults.standard.string(forKey: "git_user_name") ?? "AIReverse"
-        let email = UserDefaults.standard.string(forKey: "git_user_email") ?? "aistudio@local"
-        return (name, email)
+        ("AIReverse", "aistudio@local")
     }
 
     // MARK: - HTTP helpers

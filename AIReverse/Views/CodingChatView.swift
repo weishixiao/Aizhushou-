@@ -29,7 +29,6 @@ struct CodingChatView: View {
             inputBar
         }
         .background(backgroundColor.ignoresSafeArea())
-        .navigationTitle("AI 对话")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -51,6 +50,19 @@ struct CodingChatView: View {
                         .foregroundColor(accent)
                 }
             }
+
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 1) {
+                    Text(navigationProgressTitle)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                    Text(navigationProgressSubtitle)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                    }
+            }
         }
         .sheet(isPresented: $showRepoSettings) {
             NavigationView {
@@ -64,7 +76,7 @@ struct CodingChatView: View {
         }
         .sheet(isPresented: $showModelSettings) {
             NavigationView {
-                ModelSettingsView()
+                SettingsHubView()
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("完成") { showModelSettings = false }
@@ -89,6 +101,35 @@ struct CodingChatView: View {
     }
 
     // MARK: - 状态信息
+
+    private var navigationProgressTitle: String {
+        if agent.isWorking {
+            return agent.stageText ?? "处理中"
+        }
+        if let task = currentTaskTitle {
+            return task
+        }
+        return "等待输入"
+    }
+
+    private var navigationProgressSubtitle: String {
+        if agent.isWorking {
+            return "当前任务进行中"
+        }
+        if agent.messages.contains(where: { $0.role == .user }) {
+            return "上次对话已恢复"
+        }
+        return "发送消息或上传文件开始任务"
+    }
+
+    private var currentTaskTitle: String? {
+        guard let content = agent.messages.last(where: { $0.role == .user })?.content else { return nil }
+        let singleLine = content
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !singleLine.isEmpty else { return nil }
+        return String(singleLine.prefix(18))
+    }
 
     private var uploadStatusBar: some View {
         Group {
@@ -242,7 +283,7 @@ struct CodingChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
-        .background(Color.white)
+        .background(backgroundColor)
         .overlay(
             Rectangle()
                 .fill(Color.black.opacity(0.05))
