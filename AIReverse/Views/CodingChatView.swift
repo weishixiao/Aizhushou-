@@ -5,7 +5,6 @@ import UIKit
 /// 顶部模型信息条 + 文档式消息流 + 圆角输入区
 struct CodingChatView: View {
     @EnvironmentObject var modelStore: ModelStore
-    @EnvironmentObject var analysisStore: AnalysisStore
     @StateObject private var agent: CodingAgent
 
     @State private var inputText = ""
@@ -21,7 +20,6 @@ struct CodingChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             modelBar
-            analysisContextBar
             if !hasStartedConversation {
                 repoEntryCard
             }
@@ -56,20 +54,10 @@ struct CodingChatView: View {
             ModelPickerView(modelStore: modelStore)
         }
         .onAppear {
-            syncAnalysisContext()
             if agent.messages.isEmpty {
                 seedWelcome()
             }
         }
-        .onChange(of: analysisStore.activeResult?.url) { _ in
-            syncAnalysisContext()
-        }
-    }
-
-    private func syncAnalysisContext() {
-        let result = analysisStore.activeResult
-        agent.setAnalysisContext(result)
-        agent.includeAnalysisContext = result != nil
     }
 
     private var backgroundColor: Color {
@@ -207,49 +195,6 @@ struct CodingChatView: View {
         )
         .padding(.horizontal, 16)
         .padding(.top, 12)
-    }
-
-    /// 分析上下文状态条：显示当前分析的文件，并支持开关附带
-    private var analysisContextBar: some View {
-        let hasAnalysis = analysisStore.activeResult != nil
-        return HStack(spacing: 8) {
-            Image(systemName: "doc.magnifyingglass")
-                .font(.caption)
-                .foregroundColor(hasAnalysis ? accent : .secondary)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("分析上下文")
-                    .font(.system(size: 10))
-                    .foregroundColor(.secondary)
-                Text(analysisStore.activeResult?.url.lastPathComponent ?? "未加载分析文件")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Button {
-                guard hasAnalysis else { return }
-                agent.includeAnalysisContext.toggle()
-            } label: {
-                Text(hasAnalysis ? (agent.includeAnalysisContext ? "已附带" : "已关闭") : "无上下文")
-                    .font(.system(size: 11, weight: .medium))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(hasAnalysis && agent.includeAnalysisContext ? accent : Color(.systemGray5))
-                    .foregroundColor(hasAnalysis && agent.includeAnalysisContext ? .white : .secondary)
-                    .cornerRadius(10)
-            }
-            .buttonStyle(.plain)
-            .disabled(!hasAnalysis)
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 6)
-        .background(Color.white)
-        .overlay(
-            Rectangle()
-                .fill(Color.black.opacity(0.05))
-                .frame(height: 1),
-            alignment: .bottom
-        )
     }
 
     private var modelName: String {
@@ -403,7 +348,7 @@ struct CodingChatView: View {
         let text = """
         # 实现 Git 仓库接口
 
-        欢迎使用编程助手。你可以让我直接读写代码、查看 git 状态并提交变更；如果在「分析」页已打开文件，我还能基于分析结果回答逆向问题。
+        欢迎使用编程助手。你可以让我直接读写代码、查看 git 状态并提交变更。
 
         ## 开始之前
 
@@ -414,7 +359,6 @@ struct CodingChatView: View {
         ## 试试这样问我
 
         - 查看当前工作区有哪些文件
-        - 分析页打开的文件主要做了什么，有没有可疑网络请求
         - 帮我新增一个工具函数
         - 提交当前的所有变更
         """

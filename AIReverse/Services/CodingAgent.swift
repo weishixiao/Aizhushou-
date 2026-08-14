@@ -22,11 +22,9 @@ final class CodingAgent: ObservableObject {
     @Published var toolCards: [ToolCallCard] = []
     @Published var isWorking = false
     @Published var allowMutating = false
-    @Published var includeAnalysisContext = true
     @Published var errorMessage: String?
 
     var repoConfig = GitRepoConfig()
-    private(set) var analysisContext: String?
     private(set) var workspace: WorkspaceManager
     private let github = GitHubAPIClient()
     private let registry = ToolRegistry()
@@ -148,11 +146,6 @@ final class CodingAgent: ObservableObject {
         tracker.bind(to: workspace)
     }
 
-    /// 同步当前分析结果作为聊天上下文
-    func setAnalysisContext(_ result: AnalysisResult?) {
-        analysisContext = result?.contextText
-    }
-
     func resetConversation() {
         messages.removeAll()
         toolCards.removeAll()
@@ -175,9 +168,6 @@ final class CodingAgent: ObservableObject {
         """
         if workspace.workspaceRoot != nil {
             systemPrompt += "\n\n当前工作区已就绪。使用 list_dir 查看根目录结构。"
-        }
-        if includeAnalysisContext, let ctx = analysisContext {
-            systemPrompt += "\n\n=== 当前分析的文件 ===\n\(ctx)\n\n用户可能在分析页打开了 .tipa / .ipa / .app 或 Mach-O 二进制。请基于以上分析结果回答用户关于该文件的逆向问题；涉及代码仓库时仍可使用工具。"
         }
         history.append(ChatMessage(role: .system, content: systemPrompt))
         history.append(contentsOf: messages)
