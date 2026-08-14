@@ -29,14 +29,17 @@ struct ChatMessage: Identifiable, Equatable {
     var name: String?
     /// assistant 消息携带的工具调用列表
     var assistantToolCalls: [ToolCall]?
+    /// 本地执行进度消息，不参与模型上下文
+    var isProgress: Bool
 
-    init(role: Role, content: String, date: Date = Date(), toolCallID: String? = nil, name: String? = nil, assistantToolCalls: [ToolCall]? = nil) {
+    init(role: Role, content: String, date: Date = Date(), toolCallID: String? = nil, name: String? = nil, assistantToolCalls: [ToolCall]? = nil, isProgress: Bool = false) {
         self.role = role
         self.content = content
         self.date = date
         self.toolCallID = toolCallID
         self.name = name
         self.assistantToolCalls = assistantToolCalls
+        self.isProgress = isProgress
     }
 
     static func == (lhs: ChatMessage, rhs: ChatMessage) -> Bool {
@@ -46,5 +49,6 @@ struct ChatMessage: Identifiable, Equatable {
             && lhs.toolCallID == rhs.toolCallID
             && lhs.name == rhs.name
             && lhs.assistantToolCalls == rhs.assistantToolCalls
+            && lhs.isProgress == rhs.isProgress
     }
 }

@@ -27,7 +27,6 @@ struct CodingChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            executionProgressPanel
             messageList
             uploadStatusBar
             modelSwitcher
@@ -186,77 +185,6 @@ struct CodingChatView: View {
         }
     }
 
-    private var executionProgressPanel: some View {
-        Group {
-            if agent.isWorking || agent.pendingTask != nil {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(accent)
-                        Text("执行过程")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.primary)
-                        Spacer()
-                        if !agent.isWorking, agent.pendingTask != nil {
-                            Button {
-                                resumePendingTask()
-                            } label: {
-                                Text("恢复上次任务")
-                                    .font(.caption)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(accent.opacity(0.12))
-                                    .foregroundColor(accent)
-                                    .cornerRadius(10)
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(resumeTargetModel == nil)
-                        }
-                    }
-
-                    if let prompt = agent.pendingTask?.prompt, !prompt.isEmpty, !agent.isWorking {
-                        Text("上次任务：\(prompt)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(2)
-                    }
-
-                    if !agent.stageHistory.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(agent.stageHistory.suffix(4).enumerated()), id: \.offset) { index, stage in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Text("\(index + 1).")
-                                        .font(.caption2.monospacedDigit())
-                                        .foregroundColor(.secondary)
-                                    Text(stage)
-                                        .font(.caption)
-                                        .foregroundColor(index == agent.stageHistory.suffix(4).count - 1 ? .primary : .secondary)
-                                        .lineLimit(2)
-                                    Spacer()
-                                }
-                            }
-                        }
-                    } else if let currentStage = agent.stageText ?? agent.pendingTask?.currentStage {
-                        Text(currentStage)
-                            .font(.caption)
-                            .foregroundColor(.primary)
-                            .lineLimit(2)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(accent.opacity(0.12), lineWidth: 1)
-                )
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-            }
-        }
-    }
-
     // MARK: - 文档式消息流
 
     private var messageList: some View {
@@ -266,10 +194,6 @@ struct CodingChatView: View {
                     ForEach(agent.messages) { msg in
                         DocumentMessageRow(message: msg)
                             .id(msg.id)
-                    }
-                    if agent.isWorking {
-                        stageIndicator
-                            .id("typing")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -282,35 +206,7 @@ struct CodingChatView: View {
                     }
                 }
             }
-            .onChange(of: agent.isWorking) { _ in
-                withAnimation { proxy.scrollTo("typing", anchor: .bottom) }
-            }
         }
-    }
-
-    private var stageIndicator: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-                .tint(accent)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(agent.stageText ?? "思考中")
-                    .font(.footnote)
-                    .foregroundColor(.primary)
-                Text("AI 正在处理，请稍候")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.white)
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(accent.opacity(0.2), lineWidth: 1)
-        )
     }
 
     // MARK: - 输入区
@@ -428,11 +324,13 @@ struct CodingChatView: View {
             Button {
                 if agent.isWorking {
                     stopConversation()
+                } else if canResumeFromInputButton {
+                    resumePendingTask()
                 } else {
                     sendInput()
                 }
             } label: {
-                Image(systemName: agent.isWorking ? "stop.fill" : "arrow.up")
+                Image(systemName: inputButtonIcon)
                     .font(.system(size: 17, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 40, height: 40)
@@ -440,7 +338,7 @@ struct CodingChatView: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(!agent.isWorking && inputText.trimmingCharacters(in: .whitespaces).isEmpty)
+            .disabled(inputButtonDisabled)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
@@ -457,8 +355,28 @@ struct CodingChatView: View {
 
     private var sendButtonColor: Color {
         if agent.isWorking { return .red }
-        if inputText.trimmingCharacters(in: .whitespaces).isEmpty { return Color(.systemGray4) }
+        if canResumeFromInputButton { return accent }
+        if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return Color(.systemGray4) }
         return accent
+    }
+
+    private var inputButtonIcon: String {
+        if agent.isWorking { return "stop.fill" }
+        if canResumeFromInputButton { return "arrow.clockwise" }
+        return "arrow.up"
+    }
+
+    private var inputButtonDisabled: Bool {
+        if agent.isWorking { return false }
+        if canResumeFromInputButton { return false }
+        return inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var canResumeFromInputButton: Bool {
+        !agent.isWorking
+            && agent.pendingTask != nil
+            && inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && resumeTargetModel != nil
     }
 
     private func sendInput() {

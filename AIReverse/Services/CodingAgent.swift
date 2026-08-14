@@ -271,6 +271,8 @@ final class CodingAgent: ObservableObject {
         stageText = text
         if stageHistory.last != text {
             stageHistory.append(text)
+            messages.append(ChatMessage(role: .assistant, content: text, isProgress: true))
+            saveConversation()
         }
         pendingModelID = model.id
         pendingPrompt = prompt
@@ -320,7 +322,7 @@ final class CodingAgent: ObservableObject {
             systemPrompt += "\n\n用户最近上传文件的本地静态扫描摘要：\n\(truncate(packageScanSummary, limit: 5000))"
         }
         history.append(ChatMessage(role: .system, content: systemPrompt))
-        history.append(contentsOf: messages)
+        history.append(contentsOf: messages.filter { !$0.isProgress })
         return history
     }
 
@@ -352,7 +354,7 @@ final class CodingAgent: ObservableObject {
               let records = try? JSONDecoder().decode([StoredChatMessage].self, from: data) else {
             return
         }
-        messages = records.map { ChatMessage(role: $0.role, content: $0.content, date: $0.date) }
+        messages = records.map { ChatMessage(role: $0.role, content: $0.content, date: $0.date, isProgress: $0.isProgress) }
     }
 
     private func restorePendingTask() {
@@ -372,7 +374,7 @@ final class CodingAgent: ObservableObject {
         guard let url = conversationURL() else { return }
         let records = messages
             .filter { $0.role == .user || $0.role == .assistant }
-            .map { StoredChatMessage(role: $0.role, content: $0.content, date: $0.date) }
+            .map { StoredChatMessage(role: $0.role, content: $0.content, date: $0.date, isProgress: $0.isProgress) }
         guard let data = try? JSONEncoder().encode(records) else { return }
         try? data.write(to: url, options: .atomic)
     }
@@ -419,4 +421,27 @@ private struct StoredChatMessage: Codable {
     let role: ChatMessage.Role
     let content: String
     let date: Date
+    let isProgress: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case date
+        case isProgress
+    }
+
+    init(role: ChatMessage.Role, content: String, date: Date, isProgress: Bool = false) {
+        self.role = role
+        self.content = content
+        self.date = date
+        self.isProgress = isProgress
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        role = try container.decode(ChatMessage.Role.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        date = try container.decode(Date.self, forKey: .date)
+        isProgress = try container.decodeIfPresent(Bool.self, forKey: .isProgress) ?? false
+    }
 }

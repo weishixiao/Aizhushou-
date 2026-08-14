@@ -409,6 +409,8 @@ final class LLMClient {
         case .openAI:
             if baseURL.hasSuffix("/v1") {
                 endpoint = baseURL + "/chat/completions"
+            } else if baseURL.hasSuffix("/v1beta") || baseURL.hasSuffix("/openai") {
+                endpoint = baseURL + "/chat/completions"
             } else if baseURL.contains("/chat/completions") {
                 endpoint = baseURL
             } else {
@@ -435,7 +437,12 @@ final class LLMClient {
         } else if baseURL.hasSuffix("/messages") {
             baseURL = String(baseURL.dropLast("/messages".count))
         }
-        let endpoint = baseURL.hasSuffix("/v1") ? baseURL + "/models" : baseURL + "/v1/models"
+        let endpoint: String
+        if baseURL.hasSuffix("/v1") || baseURL.hasSuffix("/v1beta") || baseURL.hasSuffix("/openai") {
+            endpoint = baseURL + "/models"
+        } else {
+            endpoint = baseURL + "/v1/models"
+        }
         guard let url = URL(string: endpoint) else { throw LLMError.invalidURL }
         return url
     }

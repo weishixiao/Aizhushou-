@@ -16,7 +16,7 @@ struct ModelSettingsView: View {
         List {
             Section {
                 if modelStore.models.isEmpty {
-                    Text("还没有添加模型。点击右上角「+」添加，或从下方「常用模型」一键添加。")
+                    Text("还没有添加模型。点击下方「自定义添加」添加。")
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(modelStore.models) { model in
@@ -26,44 +26,7 @@ struct ModelSettingsView: View {
             } header: {
                 Text("自定义模型")
             } footer: {
-                Text("支持 OpenAI 兼容协议（DeepSeek、OpenAI、Kimi、Ollama 等）与 Anthropic Claude 官方 API。Base URL 形如 https://api.deepseek.com 或 https://api.anthropic.com，模型名为接口要求的模型标识。")
-            }
-
-            Section {
-                Button {
-                    addAllPresets()
-                } label: {
-                    Label("添加全部常用模型", systemImage: "tray.and.arrow.down.fill")
-                }
-
-                ForEach(ModelPreset.all) { preset in
-                    Button {
-                        addPreset(preset)
-                    } label: {
-                        HStack(spacing: 12) {
-                            Image(systemName: preset.symbol)
-                                .font(.system(size: 18))
-                                .foregroundColor(.accentColor)
-                                .frame(width: 26)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(preset.name)
-                                    .foregroundColor(.primary)
-                                Text("\(preset.apiTypeLabel) · \(preset.baseURL)")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-                            Spacer()
-                            Image(systemName: "plus.circle")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            } header: {
-                Text("常用模型（一键添加）")
-            } footer: {
-                Text("点击后自动填入默认接口地址与模型名，保存前请填写自己的 API Key。")
+                Text("支持 OpenAI 兼容接口与 Claude 官方接口，保存时会自动判断协议类型。")
             }
 
             Section {
@@ -81,15 +44,6 @@ struct ModelSettingsView: View {
             }
         }
         .navigationTitle("模型设置")
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showAdd = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-            }
-        }
         .sheet(isPresented: $showAdd) {
             ModelEditView(model: nil) { newModel in
                 modelStore.add(newModel)
@@ -106,32 +60,6 @@ struct ModelSettingsView: View {
                 message: Text(testResult ?? ""),
                 dismissButton: .default(Text("好"))
             )
-        }
-    }
-
-    private func addPreset(_ preset: ModelPreset) {
-        guard !modelStore.models.contains(where: { existing in
-            existing.apiType == preset.apiType
-                && existing.baseURL == preset.baseURL
-                && existing.modelID == preset.modelID
-        }) else { return }
-
-        let config = AIModelConfig(
-            name: preset.name,
-            baseURL: preset.baseURL,
-            apiKey: "",
-            modelID: preset.modelID,
-            apiType: preset.apiType
-        )
-        modelStore.add(config)
-    }
-
-    private func addAllPresets() {
-        let existing = Set(modelStore.models.map { "\($0.apiType.rawValue)|\($0.baseURL)|\($0.modelID)" })
-        for preset in ModelPreset.all {
-            let key = "\(preset.apiType.rawValue)|\(preset.baseURL)|\(preset.modelID)"
-            guard !existing.contains(key) else { continue }
-            addPreset(preset)
         }
     }
 
@@ -212,100 +140,6 @@ struct ModelSettingsView: View {
     }
 }
 
-/// 常用模型预设（一键添加）
-struct ModelPreset: Identifiable {
-    let id = UUID()
-    let name: String
-    let symbol: String
-    let baseURL: String
-    let modelID: String
-    let apiType: ModelAPIType
-
-    var apiTypeLabel: String {
-        apiType == .anthropic ? "Claude API" : "OpenAI 兼容"
-    }
-
-    static let all: [ModelPreset] = [
-        ModelPreset(
-            name: "Claude Sonnet 4",
-            symbol: "sparkles",
-            baseURL: "https://api.anthropic.com",
-            modelID: "claude-sonnet-4-20250514",
-            apiType: .anthropic
-        ),
-        ModelPreset(
-            name: "Claude Opus 4",
-            symbol: "sparkles",
-            baseURL: "https://api.anthropic.com",
-            modelID: "claude-opus-4-20250514",
-            apiType: .anthropic
-        ),
-        ModelPreset(
-            name: "Claude Haiku 3.5",
-            symbol: "bolt.fill",
-            baseURL: "https://api.anthropic.com",
-            modelID: "claude-3-5-haiku-20241022",
-            apiType: .anthropic
-        ),
-        ModelPreset(
-            name: "OpenAI GPT-4o",
-            symbol: "circle.hexagongrid.fill",
-            baseURL: "https://api.openai.com/v1",
-            modelID: "gpt-4o",
-            apiType: .openAI
-        ),
-        ModelPreset(
-            name: "OpenAI GPT-4o mini",
-            symbol: "circle.hexagongrid.fill",
-            baseURL: "https://api.openai.com/v1",
-            modelID: "gpt-4o-mini",
-            apiType: .openAI
-        ),
-        ModelPreset(
-            name: "DeepSeek Chat",
-            symbol: "waveform.path.ecg",
-            baseURL: "https://api.deepseek.com",
-            modelID: "deepseek-chat",
-            apiType: .openAI
-        ),
-        ModelPreset(
-            name: "DeepSeek Reasoner",
-            symbol: "brain.head.profile",
-            baseURL: "https://api.deepseek.com",
-            modelID: "deepseek-reasoner",
-            apiType: .openAI
-        ),
-        ModelPreset(
-            name: "Kimi (Moonshot)",
-            symbol: "moon.stars.fill",
-            baseURL: "https://api.moonshot.cn/v1",
-            modelID: "moonshot-v1-8k",
-            apiType: .openAI
-        ),
-        ModelPreset(
-            name: "通义千问 Qwen",
-            symbol: "cloud.fill",
-            baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            modelID: "qwen-plus",
-            apiType: .openAI
-        ),
-        ModelPreset(
-            name: "智谱 GLM",
-            symbol: "brain",
-            baseURL: "https://open.bigmodel.cn/api/paas/v4",
-            modelID: "glm-4-flash",
-            apiType: .openAI
-        ),
-        ModelPreset(
-            name: "本地 Ollama",
-            symbol: "desktopcomputer",
-            baseURL: "http://127.0.0.1:11434/v1",
-            modelID: "llama3.1",
-            apiType: .openAI
-        )
-    ]
-}
-
 /// 模型编辑表单
 struct ModelEditView: View {
     let model: AIModelConfig?
@@ -316,7 +150,6 @@ struct ModelEditView: View {
     @State private var baseURL: String = ""
     @State private var apiKey: String = ""
     @State private var modelID: String = ""
-    @State private var apiType: ModelAPIType = .openAI
     @State private var isTesting = false
     @State private var testResult: String?
     @State private var showTestAlert = false
@@ -332,23 +165,16 @@ struct ModelEditView: View {
                 Section("名称") {
                     TextField("例如：DeepSeek", text: $name)
                 }
-                Section("API 类型") {
-                    Picker("API 类型", selection: $apiType) {
-                        Text("OpenAI 兼容").tag(ModelAPIType.openAI)
-                        Text("Anthropic Claude").tag(ModelAPIType.anthropic)
-                    }
-                    .pickerStyle(.segmented)
-                }
                 Section("接口地址") {
-                    TextField(apiType == .anthropic ? "https://api.anthropic.com" : "https://api.deepseek.com", text: $baseURL)
+                    TextField("请输入接口地址", text: $baseURL)
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
                 }
                 Section("API Key") {
-                    SecureField(apiType == .anthropic ? "sk-ant-...（必填）" : "sk-...（可选，本地服务可留空）", text: $apiKey)
+                    SecureField("请输入 API Key", text: $apiKey)
                 }
                 Section("模型名") {
-                    TextField(apiType == .anthropic ? "claude-sonnet-4-20250514" : "deepseek-chat", text: $modelID)
+                    TextField("请输入模型名", text: $modelID)
                         .autocorrectionDisabled()
                 }
                 Section {
@@ -398,11 +224,7 @@ struct ModelEditView: View {
                 } header: {
                     Text("模型识别")
                 } footer: {
-                    if apiType == .anthropic {
-                        Text("Claude 官方接口会列出可用模型，选择后自动填入模型名。")
-                    } else {
-                        Text("使用 OpenAI 兼容的 GET /v1/models 读取中转站可用模型，选择后自动填入模型名。")
-                    }
+                    Text("自动读取接口可用模型，选择后填入模型名。")
                 }
                 Section {
                     Button {
@@ -437,7 +259,7 @@ struct ModelEditView: View {
                             baseURL: baseURL,
                             apiKey: apiKey,
                             modelID: modelID,
-                            apiType: apiType
+                            apiType: inferredAPIType
                         )
                         onSave(cfg)
                         dismiss()
@@ -452,7 +274,6 @@ struct ModelEditView: View {
                     baseURL = m.baseURL
                     apiKey = m.apiKey
                     modelID = m.modelID
-                    apiType = m.apiType
                 }
             }
             .alert(isPresented: $showTestAlert) {
@@ -467,6 +288,7 @@ struct ModelEditView: View {
 
     private func testCurrentConfig() {
         guard !isTesting else { return }
+        let apiType = inferredAPIType
         let cfg = AIModelConfig(
             id: model?.id ?? UUID(),
             name: name,
@@ -501,6 +323,7 @@ struct ModelEditView: View {
 
     private func loadAvailableModels() {
         guard !isLoadingModels else { return }
+        let apiType = inferredAPIType
         isLoadingModels = true
         modelLoadMessage = nil
         availableModels = []
@@ -531,5 +354,15 @@ struct ModelEditView: View {
     private func preferredModelName(_ item: LLMModelInfo) -> String {
         if let name = item.name, !name.isEmpty { return name }
         return item.id
+    }
+
+    private var inferredAPIType: ModelAPIType {
+        let normalized = "\(baseURL) \(modelID) \(apiKey)".lowercased()
+        if normalized.contains("anthropic")
+            || normalized.contains("claude")
+            || normalized.contains("sk-ant-") {
+            return .anthropic
+        }
+        return .openAI
     }
 }
