@@ -102,7 +102,7 @@ final class RootShellService: ObservableObject {
         setenv("SHELL", shell, 1)
         setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/usr/bin", 1)
 
-        var actions = posix_spawn_file_actions_t()
+        var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         posix_spawn_file_actions_adddup2(&actions, slave, STDIN_FILENO)
         posix_spawn_file_actions_adddup2(&actions, slave, STDOUT_FILENO)
@@ -111,7 +111,7 @@ final class RootShellService: ObservableObject {
             posix_spawn_file_actions_addclose(&actions, slave)
         }
 
-        var attr = posix_spawnattr_t()
+        var attr: posix_spawnattr_t?
         posix_spawnattr_init(&attr)
         posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID))
 

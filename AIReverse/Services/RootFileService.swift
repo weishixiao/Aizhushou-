@@ -68,7 +68,7 @@ final class RootFileService {
                 name: child.lastPathComponent.isEmpty ? child.path : child.lastPathComponent,
                 url: child,
                 isDirectory: isDir,
-                size: values?.fileSize?.int64Value ?? 0,
+                size: Int64(values?.fileSize ?? 0),
                 modificationDate: values?.contentModificationDate,
                 permissions: Self.permissionString(for: child.path),
                 isSymlink: isLink
