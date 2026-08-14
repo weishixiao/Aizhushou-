@@ -355,14 +355,18 @@ struct CodingChatView: View {
         }
         do {
             let savedURL = try saveUploadedPackage(url)
+            let report = try PackageScanner().scan(url: savedURL)
             uploadedFileName = savedURL.lastPathComponent
             uploadedFileURL = savedURL
             uploadError = nil
+            agent.setPackageScanSummary(report.summaryMarkdown)
             agent.appendLocalMessage(role: .user, content: "已上传文件：\(savedURL.lastPathComponent)")
+            agent.appendLocalMessage(role: .assistant, content: report.summaryMarkdown)
         } catch {
             uploadError = "上传失败：\(error.localizedDescription)"
             uploadedFileName = nil
             uploadedFileURL = nil
+            agent.setPackageScanSummary(nil)
         }
     }
 
@@ -373,6 +377,7 @@ struct CodingChatView: View {
         uploadedFileName = nil
         uploadedFileURL = nil
         uploadError = nil
+        agent.setPackageScanSummary(nil)
     }
 
     private func saveUploadedPackage(_ url: URL) throws -> URL {

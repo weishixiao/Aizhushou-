@@ -142,7 +142,13 @@ struct RepoManagerView: View {
                 Text(value.isEmpty ? "未设置" : value)
                     .font(.footnote)
                     .foregroundColor(.primary)
-                    .textSelection(.enabled)
+                    .contextMenu {
+                        Button {
+                            UIPasteboard.general.string = value
+                        } label: {
+                            Label("复制内容", systemImage: "doc.on.doc")
+                        }
+                    }
             }
         }
     }
