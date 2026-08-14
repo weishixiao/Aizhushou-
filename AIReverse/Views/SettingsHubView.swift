@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct SettingsHubView: View {
-    private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
-
     var body: some View {
         List {
             Section("功能区") {
@@ -14,17 +12,6 @@ struct SettingsHubView: View {
                         color: .blue,
                         title: "模型设置",
                         subtitle: "配置 API、模型名称与连接测试"
-                    )
-                }
-
-                NavigationLink {
-                    PluginManagerView()
-                } label: {
-                    featureRow(
-                        icon: "puzzlepiece.extension.fill",
-                        color: accent,
-                        title: "插件管理",
-                        subtitle: "管理仅在 AIReverse 沙盒内运行的插件文件"
                     )
                 }
             }
