@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsHubView: View {
+    @AppStorage(RootExecutionEnvironment.forceShowToolsKey) private var forceShowSystemTools = false
+
     var body: some View {
         List {
             Section("功能区") {
@@ -27,7 +29,19 @@ struct SettingsHubView: View {
                 }
             }
 
-            if RootExecutionEnvironment.supportsRootTools {
+            Section {
+                Toggle("显示系统工具入口", isOn: $forceShowSystemTools)
+                    .tint(.orange)
+                Text(RootExecutionEnvironment.diagnosticText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            } header: {
+                Text("系统工具显示")
+            } footer: {
+                Text("越狱或 TrollStore 环境检测可能受沙盒、rootless 路径和权限影响。检测失误时可手动打开入口。")
+            }
+
+            if RootExecutionEnvironment.shouldShowTools {
                 Section {
                     NavigationLink {
                         RootTerminalView()

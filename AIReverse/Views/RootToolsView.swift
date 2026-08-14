@@ -13,15 +13,12 @@ struct RootTerminalView: View {
     private let blockedKeywords = ["exploit", "inject", "frida", "bypass", "crack", "hook"]
 
     private var outputText: String {
-        if !RootExecutionEnvironment.supportsRootTools {
-            return "当前设备未开放系统终端能力。请在越狱或授权执行环境中使用。"
-        }
         if shell.isRunning || shell.output.isEmpty {
             if shell.output.isEmpty {
                 if let error = shell.state.lastError, !error.isEmpty {
                     return error
                 }
-                return "尚未连接。点击「连接」启动系统 shell。\n\n提示：本功能需要越狱或授权执行环境。\n输入 exit 可退出。"
+                return "尚未连接。点击「连接」启动系统 shell。\n\n检测状态：\(RootExecutionEnvironment.diagnosticText)\n提示：本功能需要越狱或授权执行环境。\n输入 exit 可退出。"
             }
             return shell.output
         }
@@ -33,7 +30,7 @@ struct RootTerminalView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if RootExecutionEnvironment.supportsRootTools {
+            if RootExecutionEnvironment.shouldShowTools {
                 connectionBar
                 terminalOutput
                 inputBar
@@ -122,7 +119,7 @@ struct RootTerminalView: View {
 
     private var statusText: String {
         if shell.isRunning {
-                return "系统 shell 已连接"
+            return "系统 shell 已连接"
         }
         if let error = shell.state.lastError, !error.isEmpty {
             return error

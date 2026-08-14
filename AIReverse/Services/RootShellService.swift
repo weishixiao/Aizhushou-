@@ -33,13 +33,32 @@ final class RootShellService: ObservableObject {
     /// 启动 shell。默认尝试 /bin/zsh，失败时回退 /bin/sh
     func start() {
         guard !state.running else { return }
-        let candidates = ["/bin/zsh", "/bin/bash", "/bin/sh"]
+        let candidates = [
+            "/var/jb/usr/bin/zsh",
+            "/var/jb/usr/bin/bash",
+            "/var/jb/usr/bin/sh",
+            "/var/jb/bin/zsh",
+            "/var/jb/bin/bash",
+            "/var/jb/bin/sh",
+            "/opt/procursus/bin/zsh",
+            "/opt/procursus/bin/bash",
+            "/opt/procursus/bin/sh",
+            "/usr/local/bin/zsh",
+            "/usr/local/bin/bash",
+            "/usr/local/bin/sh",
+            "/usr/bin/zsh",
+            "/usr/bin/bash",
+            "/usr/bin/sh",
+            "/bin/zsh",
+            "/bin/bash",
+            "/bin/sh"
+        ]
         for shell in candidates where FileManager.default.isExecutableFile(atPath: shell) {
             if spawn(shell: shell) {
                 return
             }
         }
-        state.lastError = "未找到可用的 shell（/bin/zsh、/bin/bash、/bin/sh）"
+        state.lastError = "未找到可用的 shell。已尝试 rootless、Procursus 与系统常见路径。"
     }
 
     /// 向 shell 发送一行命令
@@ -123,7 +142,7 @@ final class RootShellService: ObservableObject {
         setenv("TERM", "xterm-256color", 1)
         setenv("HOME", workingDirectory, 1)
         setenv("SHELL", shell, 1)
-        setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/usr/bin", 1)
+        setenv("PATH", "/var/jb/usr/bin:/var/jb/bin:/opt/procursus/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/usr/bin", 1)
 
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
