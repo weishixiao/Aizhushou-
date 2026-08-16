@@ -29,9 +29,13 @@ struct InjectionRecord: Identifiable {
 }
 
 /// 插件注入管理器：
-/// 接受用户上传的 .dylib 文件，直接复制到目标 App 的 bundle 内，
-/// 修改 Info.plist 添加 DYLD_INSERT_LIBRARIES，然后 uicache 刷新。
-/// 兼容 TrollStore / Relaxin(RootHide) / 传统越狱环境。
+/// 模仿 TrollStore 的注入方式，对目标 App 进行：
+/// 1. 复制 .dylib 到 App bundle 内
+/// 2. 用 ldid 重签名 dylib（确保被系统接受）
+/// 3. 修改 Info.plist 添加 DYLD_INSERT_LIBRARIES
+/// 4. 用 ldid 重签名主二进制（确保修改后的 App 能运行）
+/// 5. 更新 CodeResources
+/// 6. uicache 刷新
 final class InjectionManager: ObservableObject {
     static let shared = InjectionManager()
 
@@ -41,12 +45,6 @@ final class InjectionManager: ObservableObject {
 
     private init() {}
 
-    /// 注入一个已存在的 .dylib 文件到目标 App 的 bundle 内
-    /// - Parameters:
-    ///   - dylibPath: 已上传到沙盒的 .dylib 文件路径
-    ///   - app: 目标应用
-    ///   - targetDir: 忽略（兼容旧接口，不用）
-    /// - Returns: 注入结果信息
     @discardableResult
     func injectDylib(at dylibPath: String, into app: InstalledApp, targetDir: String = "") throws -> String {
         guard rt.isJailbroken else {
@@ -55,29 +53,55 @@ final class InjectionManager: ObservableObject {
 
         let dylibName = (dylibPath as NSString).lastPathComponent
         let appBundle = app.bundlePath
+        let binaryName = (appBundle as NSString).lastPathComponent
+        let mainBinary = (appBundle as NSString).appendingPathComponent(binaryName)
+        let destDylib = (appBundle as NSString).appendingPathComponent(dylibName)
+        let infoPlist = (appBundle as NSString).appendingPathComponent("Info.plist")
+        let codeResources = (appBundle as NSString).appendingPathComponent("_CodeSignature/CodeResources")
 
         // 1. 复制 dylib 到目标 App bundle 内
-        let destDylib = (appBundle as NSString).appendingPathComponent(dylibName)
-        let cpCmd = "cp \(dylibPath) \(destDylib)"
-        let (cpCode, _) = spawnAsRoot(cpCmd)
+        let (cpCode, _) = spawnAsRoot("cp \(dylibPath) \(destDylib)")
         guard cpCode == 0 else {
-            throw InjectionError.failed("复制 dylib 到 App bundle 失败（退出码=\(cpCode)），请确认 TrollStore 中已开启所有权限")
+            throw InjectionError.failed("复制 dylib 失败，请确认 TrollStore 中已开启所有权限")
         }
 
-        // 2. 修改 Info.plist，添加 DYLD_INSERT_LIBRARIES
-        let infoPlist = (appBundle as NSString).appendingPathComponent("Info.plist")
+        // 2. 用 ldid 重签名 dylib（确保系统接受注入的库）
+        // 使用 AIReverse 自身的 entitlements 作为签名权限
+        let selfEnts = Bundle.main.path(forResource: "AIReverse", ofType: "entitlements") ?? ""
+        if !selfEnts.isEmpty {
+            spawnAsRoot("ldid -S\(selfEnts) \(destDylib)")
+        } else {
+            spawnAsRoot("ldid -S \(destDylib)")
+        }
+
+        // 3. 修改 Info.plist，添加 DYLD_INSERT_LIBRARIES
         let plistCmd = "/usr/libexec/PlistBuddy -c 'Add :DYLD_INSERT_LIBRARIES string @executable_path/\(dylibName)' \(infoPlist)"
         let (plistCode, _) = spawnAsRoot(plistCmd)
         if plistCode != 0 {
-            // 可能已存在 key，尝试修改
             let setCmd = "/usr/libexec/PlistBuddy -c 'Set :DYLD_INSERT_LIBRARIES @executable_path/\(dylibName)' \(infoPlist)"
             let (setCode, _) = spawnAsRoot(setCmd)
             if setCode != 0 {
-                throw InjectionError.failed("修改 Info.plist 失败（退出码=\(setCode)）")
+                throw InjectionError.failed("修改 Info.plist 失败")
             }
         }
 
-        // 3. 刷新图标缓存
+        // 4. 用 ldid 重签名主二进制（确保修改后的 App 能正常启动）
+        // 先用 ldid 提取原始 entitlements，然后重新签名
+        let entitlementsFile = (appBundle as NSString).appendingPathComponent(".AIReverse_ent.plist")
+        spawnAsRoot("ldid -e \(mainBinary) > \(entitlementsFile)")
+        spawnAsRoot("ldid -S\(entitlementsFile) \(mainBinary)")
+        spawnAsRoot("rm -f \(entitlementsFile)")
+
+        // 5. 更新 CodeResources（如果存在 _CodeSignature 目录）
+        if FileManager.default.fileExists(atPath: codeResources) {
+            spawnAsRoot("rm -rf \((appBundle as NSString).appendingPathComponent("_CodeSignature"))")
+        }
+
+        // 6. 设置正确权限
+        spawnAsRoot("chmod 755 \(destDylib)")
+        spawnAsRoot("chown root:wheel \(destDylib)")
+
+        // 7. 刷新图标缓存
         spawnAsRoot("/usr/bin/uicache -p \(appBundle)")
 
         let record = InjectionRecord(
@@ -86,20 +110,18 @@ final class InjectionManager: ObservableObject {
             dylibName: dylibName,
             appBundlePath: appBundle,
             status: "注入成功",
-            message: "已将 \(dylibName) 注入 \(app.displayName) 的 bundle 内\n路径：\(appBundle)\n请重启应用后生效。"
+            message: "已将 \(dylibName) 注入 \(app.displayName)\n路径：\(appBundle)\n已用 ldid 重签名，重启应用生效。"
         )
         recentInjections.insert(record, at: 0)
         return record.message
     }
 
-    /// 以 root 权限执行命令（通过 posix_spawn）
     @discardableResult
     private func spawnAsRoot(_ command: String) -> (Int32, String) {
         var pid: pid_t = 0
-        let fullCmd = "/bin/sh -c '\(command)'"
         var argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(command)]
         argv.append(nil)
-        var env: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin")]
+        var env: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin")]
         env.append(nil)
         let result = posix_spawn(&pid, "/bin/sh", nil, nil, argv, env)
         defer { for a in argv { if let a { free(a) } } }
@@ -107,7 +129,6 @@ final class InjectionManager: ObservableObject {
         guard result == 0 else { return (result, "posix_spawn 失败") }
         var status: Int32 = 0
         waitpid(pid, &status, 0)
-        let exitCode = (status >> 8) & 0xFF
-        return (exitCode, "")
+        return ((status >> 8) & 0xFF, "")
     }
 }
