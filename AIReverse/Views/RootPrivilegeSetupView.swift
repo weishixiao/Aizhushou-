@@ -89,6 +89,14 @@ struct RootPrivilegeSetupView: View {
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.secondary)
                         .lineSpacing(2)
+                        .textSelection(.enabled)
+                        .contextMenu {
+                            Button {
+                                UIPasteboard.general.string = log
+                            } label: {
+                                Label("复制全部日志", systemImage: "doc.on.doc")
+                            }
+                        }
                 }
             }
 

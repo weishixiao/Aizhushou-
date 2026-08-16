@@ -176,9 +176,28 @@ final class RootPrivilegeManager {
             return "❌ 无法确定 LaunchDaemons 目录路径"
         }
         let createDirCmd = "mkdir -p \(shQuote(dir))"
-        let (createCode, _) = rt.executeCommand(createDirCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-        guard createCode == 0 else {
-            return "❌ 创建目录失败: \(createDirCmd)"
+        let (createCode, createOut) = rt.executeCommand(createDirCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        if createCode != 0 {
+            // mobile 用户无权限创建目录，提供手动命令
+            log.append("⚠️ 自动创建目录失败（mobile 权限不足）")
+            log.append("")
+            log.append("📋 请在 NewTerm 中执行以下命令手动配置：")
+            log.append("")
+            log.append("=== 步骤 1：创建目录 ===")
+            log.append("mkdir -p \(dir)")
+            log.append("")
+            log.append("=== 步骤 2：创建 plist 配置文件 ===")
+            log.append("cat > \(shQuote(daemonPlistPath)) << 'PLISTEOF'")
+            log.append(daemonPlistContent(binaryPath: binaryPath))
+            log.append("PLISTEOF")
+            log.append("")
+            log.append("=== 步骤 3：设置权限并加载 ===")
+            log.append("chown root:wheel \(shQuote(daemonPlistPath))")
+            log.append("launchctl load \(shQuote(daemonPlistPath))")
+            log.append("launchctl start \(Self.daemonLabel)")
+            log.append("")
+            log.append("🔑 root shell: \(shellPath)")
+            return log.joined(separator: "\n")
         }
         log.append("✓ 目录已创建: \(dir)")
 
