@@ -2,48 +2,30 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- 平台应用：拥有系统级权限 -->
+	<key>application-identifier</key>
+	<string>com.ai.reverser</string>
 	<key>platform-application</key>
 	<true/>
-	<!-- 允许调试 / 注入其他进程 -->
 	<key>get-task-allow</key>
 	<true/>
 	<key>task_for_pid-allow</key>
 	<true/>
-	<!-- 绕过沙盒容器要求 -->
-	<key>com.apple.private.security.container-required</key>
-	<false/>
-	<key>com.apple.private.security.no-container</key>
-	<true/>
-	<!-- RootHide 越狱额外需要的沙盒权限 -->
 	<key>com.apple.private.security.no-sandbox</key>
 	<true/>
 	<key>com.apple.private.security.storage.AppBundles</key>
 	<true/>
 	<key>com.apple.private.security.storage.AppDataContainers</key>
 	<true/>
-	<!-- 跳过动态库签名校验（允许注入 dylib 到其他 App） -->
-	<key>com.apple.private.skip-library-validation</key>
+	<key>com.apple.private.persona-mgmt</key>
 	<true/>
-	<!-- 允许读写任意绝对路径文件（越狱/系统目录） -->
 	<key>com.apple.security.exception.files.absolute-path.read-write</key>
 	<array>
-		<string>/var/</string>
-		<string>/usr/</string>
-		<string>/Library/</string>
-		<string>/private/</string>
-		<string>/Applications</string>
-		<string>/bin</string>
-		<string>/sbin</string>
-		<string>/etc</string>
-		<string>/tmp</string>
+		<string>/</string>
 	</array>
-	<key>com.apple.security.exception.files.absolute-path.read-only</key>
-	<array>
-		<string>/System</string>
-		<string>/usr/lib</string>
-	</array>
-	<!-- rootless 越狱存储访问 -->
+	<key>com.apple.private.skip-library-validation</key>
+	<true/>
+	<key>com.apple.private.cs.debugger</key>
+	<true/>
 	<key>com.apple.rootless.storage.private-container-access</key>
 	<true/>
 	<key>com.apple.rootless.storage.cydia</key>
@@ -52,14 +34,23 @@
 	<true/>
 	<key>com.apple.private.injected-process-policy</key>
 	<true/>
-	<!-- 允许进程监视 / 信号控制 -->
-	<key>com.apple.private.cs.debugger</key>
-	<true/>
-	<!-- 允许网络客户端（连接 AI API） -->
 	<key>com.apple.webinspector.allow-remote-inspection</key>
 	<true/>
-	<!-- 系统刷新（uicache 相关） -->
 	<key>com.apple.private.security.storage.SpringBoard</key>
+	<true/>
+	<key>com.apple.springboard.opensensitiveurl</key>
+	<true/>
+	<key>com.apple.private.coreservices.canmaplsdatabase</key>
+	<true/>
+	<key>com.apple.lsapplicationworkspace.rebuildappdatabases</key>
+	<true/>
+	<key>com.apple.private.MobileContainerManager.allowed</key>
+	<true/>
+	<key>com.apple.private.MobileInstallationHelperService.InstallDaemonOpsEnabled</key>
+	<true/>
+	<key>com.apple.private.MobileInstallationHelperService.allowed</key>
+	<true/>
+	<key>com.apple.private.uninstall.deletion</key>
 	<true/>
 </dict>
 </plist>

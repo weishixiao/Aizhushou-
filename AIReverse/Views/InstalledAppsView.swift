@@ -454,37 +454,6 @@ struct InjectPluginSheet: View {
             errorMessage = "无法从 .deb 包中提取 dylib 文件，请确认 deb 内包含 .dylib 插件"
             return
         }
-        // 构建注入目录路径
-        let dir: String = {
-            switch jailbreakType {
-            case .rootless:
-                // 字符拼接，防止编译器截断字符串常量
-                var path = "/"
-                path += "var"; path += "/"
-                path += "jb"; path += "/"
-                path += "Library"; path += "/"
-                path += "MobileSubstrate"; path += "/"
-                path += "DynamicLibraries"
-                return path
-            case .legacy:
-                var path = "/"
-                path += "Library"; path += "/"
-                path += "MobileSubstrate"; path += "/"
-                path += "DynamicLibraries"
-                return path
-            case .roothide:
-                // 通过 jbroot 命令获取 RootHide 真实路径
-                let (code, output) = rt.executeCommand("jbroot /Library/MobileSubstrate/DynamicLibraries", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-                if code == 0 {
-                    let jbPath = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !jbPath.isEmpty { return jbPath }
-                }
-                // 如果 jbroot 命令失败，提示用户
-                errorMessage = "无法获取 RootHide 注入目录，请确认：\n1. TrollStore 中已开启 App 的所有权限\n2. 设备已越狱\n3. 可尝试选择其他越狱类型"
-                return ""
-            }
-        }()
-        if dir.isEmpty { return }
 
         isInjecting = true
         resultMessage = nil
@@ -492,7 +461,8 @@ struct InjectPluginSheet: View {
 
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let msg = try InjectionManager.shared.injectDylib(at: dylibPath, into: app, targetDir: dir)
+                // 直接注入到 App bundle，不再需要 targetDir 参数
+                let msg = try InjectionManager.shared.injectDylib(at: dylibPath, into: app)
                 DispatchQueue.main.async {
                     isInjecting = false
                     resultMessage = msg

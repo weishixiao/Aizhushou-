@@ -22,14 +22,16 @@ struct InjectionRecord: Identifiable {
     let appBundleID: String
     let appName: String
     let dylibName: String
-    let targetDir: String
+    let appBundlePath: String
     let status: String
     let message: String
     let date = Date()
 }
 
 /// 插件注入管理器：
-/// 接受用户上传的 .dylib 文件，复制到指定的注入目录，安装 Filter.plist，然后 uicache 刷新。
+/// 接受用户上传的 .dylib 文件，直接复制到目标 App 的 bundle 内，
+/// 修改 Info.plist 添加 DYLD_INSERT_LIBRARIES，然后 uicache 刷新。
+/// 兼容 TrollStore / Relaxin(RootHide) / 传统越狱环境。
 final class InjectionManager: ObservableObject {
     static let shared = InjectionManager()
 
@@ -39,121 +41,73 @@ final class InjectionManager: ObservableObject {
 
     private init() {}
 
-    /// 注入一个已存在的 .dylib 文件到目标应用
+    /// 注入一个已存在的 .dylib 文件到目标 App 的 bundle 内
     /// - Parameters:
     ///   - dylibPath: 已上传到沙盒的 .dylib 文件路径
     ///   - app: 目标应用
-    ///   - targetDir: 注入目录（如 /var/jb/Library/MobileSubstrate/DynamicLibraries）
+    ///   - targetDir: 忽略（兼容旧接口，不用）
     /// - Returns: 注入结果信息
     @discardableResult
-    func injectDylib(at dylibPath: String, into app: InstalledApp, targetDir: String) throws -> String {
+    func injectDylib(at dylibPath: String, into app: InstalledApp, targetDir: String = "") throws -> String {
         guard rt.isJailbroken else {
             throw InjectionError.failed("未检测到越狱环境，无法注入")
         }
 
         let dylibName = (dylibPath as NSString).lastPathComponent
-        let tweakName = (dylibName as NSString).deletingPathExtension
-        let plistName = "\(tweakName).plist"
+        let appBundle = app.bundlePath
 
-        // 解析实际注入目录：
-        // 1. 先尝试直接用 targetDir（兼容传统越狱 /var/jb/...）
-        // 2. 如果不存在，尝试通过 jbroot 命令获取 RootHide 真实路径
-        // 3. 如果还不行，尝试用 access() 检测
-        var actualDir = targetDir
-        var dirExists = false
-        actualDir.withCString { ptr in
-            dirExists = access(ptr, F_OK) == 0
+        // 1. 复制 dylib 到目标 App bundle 内
+        let destDylib = (appBundle as NSString).appendingPathComponent(dylibName)
+        let cpCmd = "cp \(dylibPath) \(destDylib)"
+        let (cpCode, _) = spawnAsRoot(cpCmd)
+        guard cpCode == 0 else {
+            throw InjectionError.failed("复制 dylib 到 App bundle 失败（退出码=\(cpCode)），请确认 TrollStore 中已开启所有权限")
         }
 
-        if !dirExists {
-            // 尝试 RootHide 的 jbroot 命令获取真实路径
-            let (exitCode, output) = rt.executeCommand("jbroot", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-            if exitCode == 0 {
-                let jbrootPath = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !jbrootPath.isEmpty {
-                    // jbroot 命令返回的是 RootHide 的根目录，拼接注入子目录
-                    let candidate = (jbrootPath as NSString).appendingPathComponent("Library/MobileSubstrate/DynamicLibraries")
-                    candidate.withCString { ptr in
-                        dirExists = access(ptr, F_OK) == 0
-                    }
-                    if dirExists {
-                        actualDir = candidate
-                    }
-                }
+        // 2. 修改 Info.plist，添加 DYLD_INSERT_LIBRARIES
+        let infoPlist = (appBundle as NSString).appendingPathComponent("Info.plist")
+        let plistCmd = "/usr/libexec/PlistBuddy -c 'Add :DYLD_INSERT_LIBRARIES string @executable_path/\(dylibName)' \(infoPlist)"
+        let (plistCode, _) = spawnAsRoot(plistCmd)
+        if plistCode != 0 {
+            // 可能已存在 key，尝试修改
+            let setCmd = "/usr/libexec/PlistBuddy -c 'Set :DYLD_INSERT_LIBRARIES @executable_path/\(dylibName)' \(infoPlist)"
+            let (setCode, _) = spawnAsRoot(setCmd)
+            if setCode != 0 {
+                throw InjectionError.failed("修改 Info.plist 失败（退出码=\(setCode)）")
             }
         }
 
-        if !dirExists {
-            // 最后尝试直接创建目录
-            var pid: pid_t = 0
-            let cmd = "/bin/mkdir -p \(actualDir)"
-            var argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(cmd)]
-            argv.append(nil)
-            var env: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin")]
-            env.append(nil)
-            let spawnResult = posix_spawn(&pid, "/bin/sh", nil, nil, argv, env)
-            defer { for a in argv { if let a { free(a) } } }
-            defer { for e in env { if let e { free(e) } } }
-            if spawnResult == 0 {
-                var status: Int32 = 0
-                waitpid(pid, &status, 0)
-                actualDir.withCString { ptr in
-                    dirExists = access(ptr, F_OK) == 0
-                }
-            }
-        }
-
-        if !dirExists {
-            throw InjectionError.failed("注入目录不存在且无法创建：\(actualDir)")
-        }
-
-        // 复制 dylib 到目标目录（用 posix_spawn cp 以绕过沙盒文件限制）
-        let destDylib = (actualDir as NSString).appendingPathComponent(dylibName)
-        let cpCmd = "/bin/cp \(dylibPath) \(destDylib)"
-        var pid2: pid_t = 0
-        var argv2: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(cpCmd)]
-        argv2.append(nil)
-        var env2: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin")]
-        env2.append(nil)
-        let cpResult = posix_spawn(&pid2, "/bin/sh", nil, nil, argv2, env2)
-        defer { for a in argv2 { if let a { free(a) } } }
-        defer { for e in env2 { if let e { free(e) } } }
-        guard cpResult == 0 else {
-            throw InjectionError.failed("复制 dylib 失败（posix_spawn 错误码=\(cpResult)）")
-        }
-        var cpStatus: Int32 = 0
-        waitpid(pid2, &cpStatus, 0)
-        let cpExit = (cpStatus >> 8) & 0xFF
-        guard cpExit == 0 else {
-            throw InjectionError.failed("复制 dylib 失败（cp 退出码=\(cpExit)）")
-        }
-
-        // 安装 Filter.plist（限定目标 App）
-        let destPlist = (actualDir as NSString).appendingPathComponent(plistName)
-        installFilterPlist(to: destPlist, bundleID: app.bundleID)
-
-        // 刷新图标缓存
-        rt.executeCommand("/usr/bin/uicache", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-        rt.executeCommand("/usr/bin/uicache", arguments: ["-p", app.bundlePath], environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        // 3. 刷新图标缓存
+        spawnAsRoot("/usr/bin/uicache -p \(appBundle)")
 
         let record = InjectionRecord(
             appBundleID: app.bundleID,
             appName: app.displayName,
             dylibName: dylibName,
-            targetDir: actualDir,
+            appBundlePath: appBundle,
             status: "注入成功",
-            message: "已将 \(dylibName) 注入 \(app.displayName)\n注入目录：\(actualDir)\n请重启应用后生效。"
+            message: "已将 \(dylibName) 注入 \(app.displayName) 的 bundle 内\n路径：\(appBundle)\n请重启应用后生效。"
         )
         recentInjections.insert(record, at: 0)
         return record.message
     }
 
-    private func installFilterPlist(to destination: String, bundleID: String) {
-        let plist: [String: Any] = [
-            "Filter": [
-                "Bundles": [bundleID]
-            ]
-        ]
-        (plist as NSDictionary).write(toFile: destination, atomically: true)
+    /// 以 root 权限执行命令（通过 posix_spawn）
+    @discardableResult
+    private func spawnAsRoot(_ command: String) -> (Int32, String) {
+        var pid: pid_t = 0
+        let fullCmd = "/bin/sh -c '\(command)'"
+        var argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(command)]
+        argv.append(nil)
+        var env: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin")]
+        env.append(nil)
+        let result = posix_spawn(&pid, "/bin/sh", nil, nil, argv, env)
+        defer { for a in argv { if let a { free(a) } } }
+        defer { for e in env { if let e { free(e) } } }
+        guard result == 0 else { return (result, "posix_spawn 失败") }
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+        let exitCode = (status >> 8) & 0xFF
+        return (exitCode, "")
     }
 }
