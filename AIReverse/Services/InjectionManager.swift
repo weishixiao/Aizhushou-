@@ -64,23 +64,30 @@ final class InjectionManager: ObservableObject {
         if !selfEnts.isEmpty { spawn("ldid -S\(selfEnts) \(destDylib)") }
         else { spawn("ldid -S \(destDylib)") }
 
-        // 3. 注入方式：优先 jtool（LC_LOAD_DYLIB），后备 DYLD_INSERT_LIBRARIES
+        // 3. 注入方式：优先 insert_dylib（文档推荐方式），次选 jtool，最后 DYLD_INSERT_LIBRARIES
+        // 文档推荐路径策略：@executable_path/xxx.dylib（不需要写系统目录）
         let dylibInstallPath = "@executable_path/\(dylibName)"
         var method = "DYLD_INSERT_LIBRARIES"
 
-        // 尝试 jtool
-        let (jtoolCode, _) = spawn("jtool --inplace --LC_LOAD_DYLIB=\(dylibInstallPath) \(mainBinary) 2>/dev/null")
-        if jtoolCode == 0 {
-            method = "LC_LOAD_DYLIB (jtool)"
+        // 尝试 insert_dylib（最可靠，专为 Mach-O 注入设计）
+        let (insertCode, _) = spawn("insert_dylib \(dylibInstallPath) \(mainBinary) \(mainBinary).injected 2>/dev/null && mv \(mainBinary).injected \(mainBinary)")
+        if insertCode == 0 {
+            method = "LC_LOAD_DYLIB (insert_dylib)"
         } else {
-            // 后备：DYLD_INSERT_LIBRARIES
-            let plistCmd = "/usr/libexec/PlistBuddy -c 'Add :DYLD_INSERT_LIBRARIES string @executable_path/\(dylibName)' \(infoPlist)"
-            let (plistCode, _) = spawn(plistCmd)
-            if plistCode != 0 {
-                let setCmd = "/usr/libexec/PlistBuddy -c 'Set :DYLD_INSERT_LIBRARIES @executable_path/\(dylibName)' \(infoPlist)"
-                let (setCode, _) = spawn(setCmd)
-                if setCode != 0 {
-                    throw InjectionError.failed("修改 Info.plist 失败，无法注入")
+            // 尝试 jtool
+            let (jtoolCode, _) = spawn("jtool --inplace --LC_LOAD_DYLIB=\(dylibInstallPath) \(mainBinary) 2>/dev/null")
+            if jtoolCode == 0 {
+                method = "LC_LOAD_DYLIB (jtool)"
+            } else {
+                // 后备：DYLD_INSERT_LIBRARIES（修改 Info.plist）
+                let plistCmd = "/usr/libexec/PlistBuddy -c 'Add :DYLD_INSERT_LIBRARIES string @executable_path/\(dylibName)' \(infoPlist)"
+                let (plistCode, _) = spawn(plistCmd)
+                if plistCode != 0 {
+                    let setCmd = "/usr/libexec/PlistBuddy -c 'Set :DYLD_INSERT_LIBRARIES @executable_path/\(dylibName)' \(infoPlist)"
+                    let (setCode, _) = spawn(setCmd)
+                    if setCode != 0 {
+                        throw InjectionError.failed("修改 Info.plist 失败，无法注入")
+                    }
                 }
             }
         }

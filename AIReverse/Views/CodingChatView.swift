@@ -663,50 +663,18 @@ struct CodingChatView: View {
 struct DocumentMessageRow: View {
     let message: ChatMessage
 
-    private let aiBubble = Color(red: 0.12, green: 0.12, blue: 0.13)
-    private let userBubble = Color(red: 0.10, green: 0.62, blue: 0.42)
-    private let toolBubble = Color(red: 0.15, green: 0.15, blue: 0.16)
+    private let bubbleColor = Color(red: 0.16, green: 0.16, blue: 0.17)
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            if message.role == .assistant {
-                // AI 头像
-                Image(systemName: "brain.head.profile")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white)
-                    .frame(width: 28, height: 28)
-                    .background(Color(red: 0.10, green: 0.62, blue: 0.42))
-                    .clipShape(Circle())
-
-                // AI 气泡
+        Group {
+            if message.role == .user || message.role == .assistant {
+                // 用户和 AI 消息统一风格：灰色圆角矩形，平铺满宽
                 MarkdownView(content: message.content)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(aiBubble)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(bubbleColor)
                     .cornerRadius(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-
-                Spacer(minLength: 40)
-            } else if message.role == .user {
-                Spacer(minLength: 40)
-
-                // 用户气泡
-                Text(message.content)
-                    .font(.system(size: 14))
-                    .lineSpacing(3)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(userBubble)
-                    .cornerRadius(16)
-
-                // 用户头像
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white)
-                    .frame(width: 28, height: 28)
-                    .background(Color.gray.opacity(0.4))
-                    .clipShape(Circle())
             } else if message.role == .tool {
                 HStack {
                     Image(systemName: "hammer.fill")
@@ -717,7 +685,7 @@ struct DocumentMessageRow: View {
                         .foregroundColor(.secondary)
                 }
                 .padding(10)
-                .background(toolBubble)
+                .background(Color(red: 0.12, green: 0.12, blue: 0.13))
                 .cornerRadius(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -729,21 +697,13 @@ struct DocumentMessageRow: View {
         }
         .padding(.horizontal, 4)
         .contextMenu {
-            Button {
-                UIPasteboard.general.string = message.content
-            } label: {
+            Button { UIPasteboard.general.string = message.content } label: {
                 Label("复制内容", systemImage: "doc.on.doc")
             }
-
-            Button {
-                UIPasteboard.general.string = quotedContent
-            } label: {
+            Button { UIPasteboard.general.string = quotedContent } label: {
                 Label("复制为引用", systemImage: "quote.bubble")
             }
-
-            Button {
-                UIPasteboard.general.string = formattedDate
-            } label: {
+            Button { UIPasteboard.general.string = formattedDate } label: {
                 Label("复制时间", systemImage: "clock")
             }
         }
