@@ -218,11 +218,28 @@ struct InjectPluginSheet: View {
     @State private var hookSpec = ""
     @State private var dylibURL: URL?
     @State private var showFilePicker = false
-    @State private var targetDir = "/var/jb/Library/MobileSubstrate/DynamicLibraries"
     @State private var isInjecting = false
     @State private var resultMessage: String?
     @State private var errorMessage: String?
     @State private var forceJailbreak = false
+
+    /// 越狱类型，注入时直接映射为硬编码路径，避免字符串被截断
+    @State private var jailbreakType: JBType = .rootless
+
+    private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
+    private let rt = JailbreakRuntime.shared
+
+    private enum JBType: String, CaseIterable, Identifiable {
+        case rootless = "Dopamine / palera1n（rootless）"
+        case legacy = "unc0ver / Taurine（传统越狱）"
+        var id: Self { self }
+        var libraryPath: String {
+            switch self {
+            case .rootless: return "/var/jb/Library/MobileSubstrate/DynamicLibraries"
+            case .legacy:   return "/Library/MobileSubstrate/DynamicLibraries"
+            }
+        }
+    }
 
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
     private let rt = JailbreakRuntime.shared
@@ -267,16 +284,25 @@ struct InjectPluginSheet: View {
                     Text("选择一个已编译好的 .dylib 或 .deb 插件文件（由 Theos 或其他方式编译生成）")
                 }
                 Section {
-                    Picker("注入目录", selection: $targetDir) {
-                        Text("/var/jb/Library/MobileSubstrate/DynamicLibraries").tag("/var/jb/Library/MobileSubstrate/DynamicLibraries")
-                        Text("/Library/MobileSubstrate/DynamicLibraries").tag("/Library/MobileSubstrate/DynamicLibraries")
+                    Picker("越狱类型", selection: $jailbreakType) {
+                        ForEach(JBType.allCases) { type in
+                            Text(type.rawValue).tag(type)
+                        }
                     }
                     .pickerStyle(.menu)
-                    .font(.system(.body, design: .monospaced))
+                    HStack {
+                        Text("注入目录")
+                            .foregroundColor(.secondary)
+                            .font(.caption)
+                        Spacer()
+                        Text(jailbreakType.libraryPath)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.primary)
+                    }
                 } header: {
                     Text("注入目录")
                 } footer: {
-                    Text("rootless(Dopamine) → /var/jb/Library/MobileSubstrate/DynamicLibraries\n传统越狱(unc0ver) → /Library/MobileSubstrate/DynamicLibraries")
+                    Text("根据你的越狱类型选择，路径自动确定")
                 }
                 Section {
                     keyValueRow("当前权限", value: rt.isRoot ? "Root ✓" : "非 Root")
@@ -437,11 +463,12 @@ struct InjectPluginSheet: View {
             errorMessage = "无法从 .deb 包中提取 dylib 文件，请确认 deb 内包含 .dylib 插件"
             return
         }
+        // 直接使用硬编码的路径，彻底避免字符串截断问题
+        let dir = jailbreakType.libraryPath
+
         isInjecting = true
         resultMessage = nil
         errorMessage = nil
-
-        let dir = targetDir.trimmingCharacters(in: .whitespaces)
 
         DispatchQueue.global(qos: .userInitiated).async {
             do {
