@@ -67,7 +67,7 @@ final class RootPrivilegeManager {
         if isRootless {
             return "Rootless（/var/jb 存在）"
         }
-        return "Unknown（可能是 rootful 或 TrollStore）"
+        return "Unknown（可能是 rootful 越狱）"
     }
 
     // MARK: - 路径检测
@@ -162,7 +162,7 @@ final class RootPrivilegeManager {
         binaryPath.withCString { ptr in binExists = access(ptr, F_OK) == 0 }
         if !binExists {
             return DaemonSetupResult(
-                log: "❌ 二进制路径不存在: \(binaryPath)\n请先用 TrollStore 安装 App",
+                log: "❌ 二进制路径不存在: \(binaryPath)\n请确认 App 已正确安装",
                 commands: []
             )
         }

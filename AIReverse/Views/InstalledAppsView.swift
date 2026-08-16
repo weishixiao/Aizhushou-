@@ -302,7 +302,7 @@ struct InjectPluginSheet: View {
                     Toggle("手动开启越狱模式", isOn: $forceJailbreak)
                         .font(.callout)
                 } footer: {
-                    Text("自动检测不到时，可手动开启越狱模式以执行注入。需在越狱 / TrollStore 环境下。")
+                    Text("自动检测不到时，可手动开启越狱模式以执行注入。需在 Relaxin / 越狱环境下。")
                 }
 
                 if let resultMessage {

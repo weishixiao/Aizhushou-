@@ -4,7 +4,7 @@ import Darwin
 /// 越狱运行时的最高权限管理。
 ///
 /// 本模块负责：
-/// 1. 检测当前进程所处的越狱环境（jailbreak / TrollStore / rootless / sandbox 状态）
+/// 1. 检测当前进程所处的越狱环境（Relaxin / rootless / sandbox 状态）
 /// 2. 尝试获取并用好 root 权限（geteuid == 0）
 /// 3. 提供「以最高权限 spawn 外部命令」的封装，供注入 / 修改数据使用
 final class JailbreakRuntime {
@@ -50,7 +50,7 @@ final class JailbreakRuntime {
         geteuid() != 0
     }
 
-    /// 是否为越狱 / TrollStore 环境
+    /// 是否为越狱环境
     var isJailbroken: Bool {
         // 0) 若用户手动强制指定，以手动值为准（自动检测在沙盒内可能受限）
         if UserDefaults.standard.object(forKey: Self.overrideKey) != nil {

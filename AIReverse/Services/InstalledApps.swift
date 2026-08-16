@@ -65,7 +65,7 @@ final class InstalledApps {
         return systemIDPrefixes.contains { bundleID.hasPrefix($0) }
     }
 
-    // MARK: - 方式一：LSApplicationWorkspace（越狱/TrollStore 下可用）
+    // MARK: - 方式一：LSApplicationWorkspace（越狱环境下可用）
 
     private func listViaLSApplicationWorkspace() -> [InstalledApp]? {
         let className = "LSApplicationWorkspace"
