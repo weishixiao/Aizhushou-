@@ -267,25 +267,16 @@ struct InjectPluginSheet: View {
                     Text("选择一个已编译好的 .dylib 或 .deb 插件文件（由 Theos 或其他方式编译生成）")
                 }
                 Section {
-                    TextField("注入目录路径", text: $targetDir)
-                        .autocapitalization(.none)
-                        .disableAutocorrection(true)
-                        .font(.system(.body, design: .monospaced))
-                    HStack(spacing: 8) {
-                        Text("快速选择：")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Button("/var/jb/...") { targetDir = "/var/jb/Library/MobileSubstrate/DynamicLibraries" }
-                            .font(.caption)
-                            .buttonStyle(.bordered)
-                        Button("/Library/...") { targetDir = "/Library/MobileSubstrate/DynamicLibraries" }
-                            .font(.caption)
-                            .buttonStyle(.bordered)
+                    Picker("注入目录", selection: $targetDir) {
+                        Text("/var/jb/Library/MobileSubstrate/DynamicLibraries").tag("/var/jb/Library/MobileSubstrate/DynamicLibraries")
+                        Text("/Library/MobileSubstrate/DynamicLibraries").tag("/Library/MobileSubstrate/DynamicLibraries")
                     }
+                    .pickerStyle(.menu)
+                    .font(.system(.body, design: .monospaced))
                 } header: {
                     Text("注入目录")
                 } footer: {
-                    Text("rootless(Dopamine) → /var/jb/Library/MobileSubstrate/DynamicLibraries\n传统越狱(unc0ver) → /Library/MobileSubstrate/DynamicLibraries\n⚠️ 请直接点击上方按钮选择，不要手动输入，避免路径错误")
+                    Text("rootless(Dopamine) → /var/jb/Library/MobileSubstrate/DynamicLibraries\n传统越狱(unc0ver) → /Library/MobileSubstrate/DynamicLibraries")
                 }
                 Section {
                     keyValueRow("当前权限", value: rt.isRoot ? "Root ✓" : "非 Root")
