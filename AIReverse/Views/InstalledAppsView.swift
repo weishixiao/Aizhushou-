@@ -271,10 +271,21 @@ struct InjectPluginSheet: View {
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                         .font(.system(.body, design: .monospaced))
+                    HStack(spacing: 8) {
+                        Text("快速选择：")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Button("/var/jb/...") { targetDir = "/var/jb/Library/MobileSubstrate/DynamicLibraries" }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                        Button("/Library/...") { targetDir = "/Library/MobileSubstrate/DynamicLibraries" }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                    }
                 } header: {
                     Text("注入目录")
                 } footer: {
-                    Text("rootless(Dopamine)：/var/jb/Library/MobileSubstrate/DynamicLibraries\nlegacy 越狱：/Library/MobileSubstrate/DynamicLibraries")
+                    Text("rootless(Dopamine) → /var/jb/Library/MobileSubstrate/DynamicLibraries\n传统越狱(unc0ver) → /Library/MobileSubstrate/DynamicLibraries\n⚠️ 请直接点击上方按钮选择，不要手动输入，避免路径错误")
                 }
                 Section {
                     keyValueRow("当前权限", value: rt.isRoot ? "Root ✓" : "非 Root")

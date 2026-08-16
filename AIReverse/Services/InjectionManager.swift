@@ -55,24 +55,54 @@ final class InjectionManager: ObservableObject {
         let tweakName = (dylibName as NSString).deletingPathExtension
         let plistName = "\(tweakName).plist"
 
-        // 确保目标目录存在
-        if !FileManager.default.fileExists(atPath: targetDir) {
-            // 尝试创建
-            try? FileManager.default.createDirectory(atPath: targetDir, withIntermediateDirectories: true)
-            if !FileManager.default.fileExists(atPath: targetDir) {
-                throw InjectionError.failed("注入目录不存在且无法创建：\(targetDir)")
+        // 用 access() 检测目录是否存在（比 fileExists 可靠，沙盒内也能感知越狱路径）
+        var dirExists = false
+        targetDir.withCString { ptr in
+            dirExists = access(ptr, F_OK) == 0
+        }
+        if !dirExists {
+            // 尝试通过 posix_spawn 创建目录（越狱环境可用）
+            var pid: pid_t = 0
+            let cmd = "/bin/mkdir -p \(targetDir)"
+            var argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(cmd)]
+            argv.append(nil)
+            var env: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin")]
+            env.append(nil)
+            let spawnResult = posix_spawn(&pid, "/bin/sh", nil, nil, argv, env)
+            defer { for a in argv { if let a { free(a) } } }
+            defer { for e in env { if let e { free(e) } } }
+            if spawnResult == 0 {
+                var status: Int32 = 0
+                waitpid(pid, &status, 0)
+                // 重新检测
+                targetDir.withCString { ptr in
+                    dirExists = access(ptr, F_OK) == 0
+                }
             }
         }
-
-        // 复制 dylib 到目标目录
-        let destDylib = (targetDir as NSString).appendingPathComponent(dylibName)
-        if FileManager.default.fileExists(atPath: destDylib) {
-            try? FileManager.default.removeItem(atPath: destDylib)
+        if !dirExists {
+            throw InjectionError.failed("注入目录不存在且无法创建：\(targetDir)")
         }
-        do {
-            try FileManager.default.copyItem(atPath: dylibPath, toPath: destDylib)
-        } catch {
-            throw InjectionError.failed("复制 dylib 失败：\(error.localizedDescription)")
+
+        // 复制 dylib 到目标目录（用 posix_spawn cp 以绕过沙盒文件限制）
+        let destDylib = (targetDir as NSString).appendingPathComponent(dylibName)
+        let cpCmd = "/bin/cp \(dylibPath) \(destDylib)"
+        var pid2: pid_t = 0
+        var argv2: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(cpCmd)]
+        argv2.append(nil)
+        var env2: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin")]
+        env2.append(nil)
+        let cpResult = posix_spawn(&pid2, "/bin/sh", nil, nil, argv2, env2)
+        defer { for a in argv2 { if let a { free(a) } } }
+        defer { for e in env2 { if let e { free(e) } } }
+        guard cpResult == 0 else {
+            throw InjectionError.failed("复制 dylib 失败（posix_spawn 错误码=\(cpResult)）")
+        }
+        var cpStatus: Int32 = 0
+        waitpid(pid2, &cpStatus, 0)
+        let cpExit = (cpStatus >> 8) & 0xFF
+        guard cpExit == 0 else {
+            throw InjectionError.failed("复制 dylib 失败（cp 退出码=\(cpExit)）")
         }
 
         // 安装 Filter.plist（限定目标 App）
@@ -80,10 +110,8 @@ final class InjectionManager: ObservableObject {
         installFilterPlist(to: destPlist, bundleID: app.bundleID)
 
         // 刷新图标缓存
-        if rt.isRoot {
-            rt.executeCommand("/usr/bin/uicache", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-            rt.executeCommand("/usr/bin/uicache", arguments: ["-p", app.bundlePath], environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-        }
+        rt.executeCommand("/usr/bin/uicache", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        rt.executeCommand("/usr/bin/uicache", arguments: ["-p", app.bundlePath], environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
 
         let record = InjectionRecord(
             appBundleID: app.bundleID,
@@ -91,7 +119,7 @@ final class InjectionManager: ObservableObject {
             dylibName: dylibName,
             targetDir: targetDir,
             status: "注入成功",
-            message: "已将 \(dylibName) 注入 \(app.displayName)，注入目录：\(targetDir)\n请重启应用后生效。"
+            message: "已将 \(dylibName) 注入 \(app.displayName)\n注入目录：\(targetDir)\n请重启应用后生效。"
         )
         recentInjections.insert(record, at: 0)
         return record.message
