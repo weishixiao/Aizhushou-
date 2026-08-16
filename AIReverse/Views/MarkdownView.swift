@@ -131,7 +131,7 @@ struct InlineText: View {
     }
 
     private var codeAccent: Color {
-        Color(red: 0.05, green: 0.55, blue: 0.35)
+        Color(red: 0.60, green: 0.60, blue: 0.65)
     }
 
     private func attributedText(_ content: String) -> AttributedString {
