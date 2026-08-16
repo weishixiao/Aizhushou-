@@ -51,7 +51,7 @@ struct ContentView: View {
                             .font(.headline)
                             .foregroundColor(.white)
 
-                        Text("AIReverse 需要 root 权限才能执行注入、进程枚举等操作。请前往"设置 → 权限设置"配置 LaunchDaemon。")
+                        Text("AIReverse 需要 root 权限才能执行注入、进程枚举等操作。请前往「设置 → 权限设置」配置 LaunchDaemon。")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)

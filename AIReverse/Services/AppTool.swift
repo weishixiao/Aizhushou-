@@ -146,7 +146,8 @@ final class SetupRootPrivilegeTool: CodingTool {
             return ToolResult(success: true, output: result)
         case "status":
             let status = mgr.daemonStatus()
-            let lines = ["守护进程状态: \(status.label)（\(status.isRunning ? "运行中" : "未运行"）)", ""] + status.details
+            let runningText = status.isRunning ? "运行中" : "未运行"
+            let lines = ["守护进程状态: \(status.label)（\(runningText)）", ""] + status.details
             return ToolResult(success: true, output: lines.joined(separator: "\n"))
         default:
             return ToolResult(success: false, output: "未知操作: \(action)")
