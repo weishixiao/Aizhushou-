@@ -13,18 +13,6 @@ final class JailbreakRuntime {
 
     /// 检测 rootless 环境下的 root shell 路径（/var/jb/opt/procursus/bin/sh 优先）
     var rootShell: String {
-        let (code, out) = executeCommand(
-            "jbroot 2>/dev/null",
-            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        )
-        if code == 0 {
-            let jbRoot = out.trimmingCharacters(in: .whitespacesAndNewlines)
-            let procursusShell = (jbRoot as NSString).appendingPathComponent("opt/procursus/bin/sh")
-            var exists = false
-            procursusShell.withCString { ptr in exists = access(ptr, F_OK) == 0 }
-            if exists { return procursusShell }
-        }
-        // 检查 /var/jb 的 procursus
         let jbProcursusShell = "/var/jb/opt/procursus/bin/sh"
         var exists = false
         jbProcursusShell.withCString { ptr in exists = access(ptr, F_OK) == 0 }

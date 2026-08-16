@@ -33,11 +33,23 @@ final class RootPrivilegeManager {
 
     /// 是否为 rootless 越狱（Relaxin / Dopamine / Palera1n-rootless / RootHide）
     var isRootless: Bool {
-        let (code, _) = JailbreakRuntime.shared.executeCommand(
-            "jbroot 2>/dev/null",
-            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        )
-        return code == 0
+        // jbroot 命令可能因 PATH 问题找不到，直接用文件路径检测
+        var exists = false
+        "/var/jb".withCString { ptr in exists = access(ptr, F_OK) == 0 }
+        if exists { return true }
+        // 检查常见 rootless 特征
+        let indicators = [
+            "/var/jb/opt/procursus",
+            "/var/jb/usr/lib/libjailbreak.dylib",
+            "/var/jb/Library/LaunchDaemons",
+            "/private/preboot/jb",
+        ]
+        for path in indicators {
+            var ok = false
+            path.withCString { ptr in ok = access(ptr, F_OK) == 0 }
+            if ok { return true }
+        }
+        return false
     }
 
     /// 是否可能是 Relaxin 环境（RootHide 变种，无 jbroot 但有 /var/jb）
@@ -49,19 +61,11 @@ final class RootPrivilegeManager {
 
     /// 当前越狱环境描述
     var environmentDescription: String {
-        if isRootless {
-            let (code, out) = JailbreakRuntime.shared.executeCommand(
-                "jbroot 2>/dev/null",
-                environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-            )
-            let jbRoot = code == 0 ? out.trimmingCharacters(in: .whitespacesAndNewlines) : ""
-            if !jbRoot.isEmpty {
-                return "Rootless（jbroot=\(jbRoot)）"
-            }
-            return "Rootless"
-        }
         if isRelaxin {
-            return "Relaxin（procursus 路径存在）"
+            return "Relaxin（rootless / procursus 存在）"
+        }
+        if isRootless {
+            return "Rootless（/var/jb 存在）"
         }
         return "Unknown（可能是 rootful 或 TrollStore）"
     }
@@ -70,23 +74,15 @@ final class RootPrivilegeManager {
 
     /// 检测 rootless 的 root 用户 shell 路径（优先 /var/jb/opt/procursus/bin/sh）
     var rootShellPath: String {
-        let (code, out) = JailbreakRuntime.shared.executeCommand(
-            "jbroot 2>/dev/null",
-            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        )
-        if code == 0 {
-            let jbRoot = out.trimmingCharacters(in: .whitespacesAndNewlines)
-            let procursusShell = (jbRoot as NSString).appendingPathComponent("opt/procursus/bin/sh")
-            var exists = false
-            procursusShell.withCString { ptr in exists = access(ptr, F_OK) == 0 }
-            if exists { return procursusShell }
-        }
         // 检查 /var/jb 的 procursus
         let jbProcursusShell = "/var/jb/opt/procursus/bin/sh"
         var exists = false
         jbProcursusShell.withCString { ptr in exists = access(ptr, F_OK) == 0 }
         if exists { return jbProcursusShell }
-        // 回退
+        // 检查 /bin/sh
+        var binExists = false
+        "/bin/sh".withCString { ptr in binExists = access(ptr, F_OK) == 0 }
+        if binExists { return "/bin/sh" }
         return "/bin/sh"
     }
 
@@ -135,20 +131,12 @@ final class RootPrivilegeManager {
 """
     }
 
-    /// 配置目录（rootless 用 jbroot 路径，普通越狱用 /var/jb）
+    /// 配置目录（rootless 用 /var/jb 路径）
     private var launchDaemonDir: String? {
-        let rt = JailbreakRuntime.shared
-        let (code, out) = rt.executeCommand(
-            "jbroot 2>/dev/null",
-            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
-        )
-        var jbRoot: String?
-        if code == 0 {
-            jbRoot = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        if let jbRoot, !jbRoot.isEmpty {
-            return (jbRoot as NSString).appendingPathComponent("Library/LaunchDaemons")
-        }
+        // 直接检测 /var/jb 路径
+        var jbExists = false
+        "/var/jb".withCString { ptr in jbExists = access(ptr, F_OK) == 0 }
+        if jbExists { return "/var/jb/Library/LaunchDaemons" }
         // 回退
         return "/var/jb/Library/LaunchDaemons"
     }
