@@ -55,15 +55,38 @@ final class InjectionManager: ObservableObject {
         let tweakName = (dylibName as NSString).deletingPathExtension
         let plistName = "\(tweakName).plist"
 
-        // 用 access() 检测目录是否存在（比 fileExists 可靠，沙盒内也能感知越狱路径）
+        // 解析实际注入目录：
+        // 1. 先尝试直接用 targetDir（兼容传统越狱 /var/jb/...）
+        // 2. 如果不存在，尝试通过 jbroot 命令获取 RootHide 真实路径
+        // 3. 如果还不行，尝试用 access() 检测
+        var actualDir = targetDir
         var dirExists = false
-        targetDir.withCString { ptr in
+        actualDir.withCString { ptr in
             dirExists = access(ptr, F_OK) == 0
         }
+
         if !dirExists {
-            // 尝试通过 posix_spawn 创建目录（越狱环境可用）
+            // 尝试 RootHide 的 jbroot 命令获取真实路径
+            let (exitCode, output) = rt.executeCommand("jbroot", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+            if exitCode == 0 {
+                let jbrootPath = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !jbrootPath.isEmpty {
+                    // jbroot 命令返回的是 RootHide 的根目录，拼接注入子目录
+                    let candidate = (jbrootPath as NSString).appendingPathComponent("Library/MobileSubstrate/DynamicLibraries")
+                    candidate.withCString { ptr in
+                        dirExists = access(ptr, F_OK) == 0
+                    }
+                    if dirExists {
+                        actualDir = candidate
+                    }
+                }
+            }
+        }
+
+        if !dirExists {
+            // 最后尝试直接创建目录
             var pid: pid_t = 0
-            let cmd = "/bin/mkdir -p \(targetDir)"
+            let cmd = "/bin/mkdir -p \(actualDir)"
             var argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(cmd)]
             argv.append(nil)
             var env: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin:/usr/sbin:/sbin")]
@@ -74,18 +97,18 @@ final class InjectionManager: ObservableObject {
             if spawnResult == 0 {
                 var status: Int32 = 0
                 waitpid(pid, &status, 0)
-                // 重新检测
-                targetDir.withCString { ptr in
+                actualDir.withCString { ptr in
                     dirExists = access(ptr, F_OK) == 0
                 }
             }
         }
+
         if !dirExists {
-            throw InjectionError.failed("注入目录不存在且无法创建：\(targetDir)")
+            throw InjectionError.failed("注入目录不存在且无法创建：\(actualDir)")
         }
 
         // 复制 dylib 到目标目录（用 posix_spawn cp 以绕过沙盒文件限制）
-        let destDylib = (targetDir as NSString).appendingPathComponent(dylibName)
+        let destDylib = (actualDir as NSString).appendingPathComponent(dylibName)
         let cpCmd = "/bin/cp \(dylibPath) \(destDylib)"
         var pid2: pid_t = 0
         var argv2: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(cpCmd)]
@@ -106,7 +129,7 @@ final class InjectionManager: ObservableObject {
         }
 
         // 安装 Filter.plist（限定目标 App）
-        let destPlist = (targetDir as NSString).appendingPathComponent(plistName)
+        let destPlist = (actualDir as NSString).appendingPathComponent(plistName)
         installFilterPlist(to: destPlist, bundleID: app.bundleID)
 
         // 刷新图标缓存
@@ -117,9 +140,9 @@ final class InjectionManager: ObservableObject {
             appBundleID: app.bundleID,
             appName: app.displayName,
             dylibName: dylibName,
-            targetDir: targetDir,
+            targetDir: actualDir,
             status: "注入成功",
-            message: "已将 \(dylibName) 注入 \(app.displayName)\n注入目录：\(targetDir)\n请重启应用后生效。"
+            message: "已将 \(dylibName) 注入 \(app.displayName)\n注入目录：\(actualDir)\n请重启应用后生效。"
         )
         recentInjections.insert(record, at: 0)
         return record.message
