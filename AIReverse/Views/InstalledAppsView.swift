@@ -241,9 +241,6 @@ struct InjectPluginSheet: View {
         }
     }
 
-    private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
-    private let rt = JailbreakRuntime.shared
-
     private var dylibFileInfo: String? {
         guard let url = dylibURL else { return nil }
         let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
