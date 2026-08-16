@@ -69,6 +69,7 @@ final class CodingAgent: ObservableObject {
         // 越狱注入 / 应用分析工具
         registry.register(ListInstalledAppsTool())
         registry.register(ModifyAppDataTool())
+        registry.register(SetupRootPrivilegeTool())
         restoreConversation()
         restorePendingTask()
     }

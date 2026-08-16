@@ -110,3 +110,46 @@ final class ModifyAppDataTool: CodingTool {
         }
     }
 }
+
+/// 提权管理工具：配置/停止 LaunchDaemon 获取 root 权限
+final class SetupRootPrivilegeTool: CodingTool {
+    var name: String { "setup_root_privilege" }
+    var description: String { "配置或停止 LaunchDaemon 守护进程以获取/释放 root 权限。适用于 Relaxin/Rootless 越狱环境。操作类型：setup=配置并启动守护进程以 root 身份运行，teardown=停止并卸载，status=查询守护进程状态。" }
+    var isMutating: Bool { true }
+
+    var parameters: [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "action": [
+                    "type": "string",
+                    "description": "操作类型：setup 配置并启动守护进程，teardown 停止并卸载，status 查询守护进程状态",
+                    "enum": ["setup", "teardown", "status"]
+                ]
+            ],
+            "required": ["action"]
+        ]
+    }
+
+    func execute(arguments: [String: Any], workspace: WorkspaceManager, github: GitHubAPIClient, repoConfig: GitRepoConfig) async throws -> ToolResult {
+        guard let action = arguments["action"] as? String else {
+            return ToolResult(success: false, output: "缺少 action 参数")
+        }
+        let mgr = RootPrivilegeManager.shared
+
+        switch action {
+        case "setup":
+            let result = mgr.setupDaemon()
+            return ToolResult(success: true, output: result)
+        case "teardown":
+            let result = mgr.teardownDaemon()
+            return ToolResult(success: true, output: result)
+        case "status":
+            let status = mgr.daemonStatus()
+            let lines = ["守护进程状态: \(status.label)（\(status.isRunning ? "运行中" : "未运行"）)", ""] + status.details
+            return ToolResult(success: true, output: lines.joined(separator: "\n"))
+        default:
+            return ToolResult(success: false, output: "未知操作: \(action)")
+        }
+    }
+}

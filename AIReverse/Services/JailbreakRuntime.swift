@@ -11,6 +11,27 @@ final class JailbreakRuntime {
     static let shared = JailbreakRuntime()
     private init() {}
 
+    /// 检测 rootless 环境下的 root shell 路径（/var/jb/opt/procursus/bin/sh 优先）
+    var rootShell: String {
+        let (code, out) = executeCommand(
+            "jbroot 2>/dev/null",
+            environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"]
+        )
+        if code == 0 {
+            let jbRoot = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            let procursusShell = (jbRoot as NSString).appendingPathComponent("opt/procursus/bin/sh")
+            var exists = false
+            procursusShell.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+            if exists { return procursusShell }
+        }
+        // 检查 /var/jb 的 procursus
+        let jbProcursusShell = "/var/jb/opt/procursus/bin/sh"
+        var exists = false
+        jbProcursusShell.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+        if exists { return jbProcursusShell }
+        return "/bin/sh"
+    }
+
     /// UserDefaults 手动覆盖越狱标识的 key
     static let overrideKey = "jailbreak_override_flag"
 
@@ -224,9 +245,10 @@ final class JailbreakRuntime {
             for e in cEnv { if let e { free(e) } }
         }
 
-        // spawn /bin/sh
+        // spawn 检测到的 root shell
         var pid: pid_t = 0
-        let spawnResult = posix_spawn(&pid, "/bin/sh", nil, nil, argv, cEnv)
+        let shellPath = isRoot ? rootShell : "/bin/sh"
+        let spawnResult = posix_spawn(&pid, shellPath, nil, nil, argv, cEnv)
         guard spawnResult == 0 else {
             return (exitCode: spawnResult, output: "posix_spawn 失败 (error=\(spawnResult))")
         }

@@ -25,6 +25,17 @@ struct SettingsHubView: View {
                         subtitle: "添加服务器、导入 mcpServers JSON"
                     )
                 }
+
+                NavigationLink {
+                    RootPrivilegeSetupView()
+                } label: {
+                    featureRow(
+                        icon: "shield.checkered",
+                        color: .orange,
+                        title: "权限设置",
+                        subtitle: "LaunchDaemon 守护进程、root 提权管理"
+                    )
+                }
             }
         }
         .navigationTitle("设置")

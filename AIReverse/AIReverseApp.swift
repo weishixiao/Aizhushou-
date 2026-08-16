@@ -11,5 +11,6 @@ struct AIReverseApp: App {
                 .environmentObject(modelStore)
                 .environmentObject(workspace)
         }
+        .defaultRegularStyle()
     }
 }

@@ -1,0 +1,140 @@
+import SwiftUI
+
+struct RootPrivilegeSetupView: View {
+    @State private var log = ""
+    @State private var isLoading = false
+    @State private var statusInfo: (label: String, isRunning: Bool, details: [String]) = ("", false, [])
+    @State private var envInfo = ""
+
+    var body: some View {
+        List {
+            // 环境信息
+            Section("环境检测") {
+                HStack {
+                    Text("环境类型")
+                        .font(.body).foregroundColor(.primary)
+                    Spacer()
+                    Text(envInfo)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.green)
+                }
+                HStack {
+                    Text("运行身份")
+                        .font(.body).foregroundColor(.primary)
+                    Spacer()
+                    Text(RootPrivilegeManager.shared.appBinaryPath)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("root shell")
+                        .font(.body).foregroundColor(.primary)
+                    Spacer()
+                    Text(RootPrivilegeManager.shared.rootShellPath)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.orange)
+                }
+            }
+
+            // 守护进程状态
+            Section("LaunchDaemon 状态") {
+                Button {
+                    refreshStatus()
+                } label: {
+                    HStack {
+                        Text("刷新状态")
+                        Spacer()
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundColor(.blue)
+                    }
+                }
+
+                if !statusInfo.details.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(statusInfo.label)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(statusInfo.isRunning ? .green : .red)
+                        ForEach(statusInfo.details, id: \.self) { detail in
+                            Text(detail)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
+            // 操作
+            Section("操作") {
+                Button(isLoading ? "操作中..." : "🚀 配置 LaunchDaemon（获取 root 权限）") {
+                    setupDaemon()
+                }
+                .foregroundColor(.green)
+
+                Button {
+                    teardownDaemon()
+                } label: {
+                    Text("⛔ 停止并卸载守护进程")
+                }
+                .foregroundColor(.red)
+            }
+
+            // 日志
+            Section("操作日志") {
+                if log.isEmpty {
+                    Text("点击上方按钮查看操作日志")
+                        .foregroundColor(.secondary)
+                } else {
+                    Text(log)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineSpacing(2)
+                }
+            }
+
+            // 说明
+            Section("说明") {
+                Text("Relaxin 环境唯一稳定的 root 提权方案。由系统 launchd 以 root 身份拉起 App 二进制，桌面图标通过 URL Scheme 唤起前台 UI。")
+                    .font(.caption).foregroundColor(.secondary)
+                Text("⚠️ 不可尝试 SetUID（AMFI 拦截）或移动 App 到 /Applications（无效）")
+                    .font(.caption).foregroundColor(.orange)
+                Text("🔧 开发阶段建议用 NewTerm root 启动测试；正式版用此 LaunchDaemon 方案")
+                    .font(.caption).foregroundColor(.secondary)
+                Text("📖 URL Scheme: aireverse://root（桌面图标点击可唤起 UI）")
+                    .font(.caption).foregroundColor(.blue)
+            }
+        }
+        .navigationTitle("权限设置")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            envInfo = RootPrivilegeManager.shared.environmentDescription
+            refreshStatus()
+        }
+    }
+
+    private func refreshStatus() {
+        statusInfo = RootPrivilegeManager.shared.daemonStatus()
+    }
+
+    private func setupDaemon() {
+        isLoading = true
+        log = "正在配置 LaunchDaemon...\n\n"
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
+            let result = RootPrivilegeManager.shared.setupDaemon()
+            isLoading = false
+            log = result
+            refreshStatus()
+        }
+    }
+
+    private func teardownDaemon() {
+        isLoading = true
+        log = "正在停止守护进程...\n\n"
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
+            let result = RootPrivilegeManager.shared.teardownDaemon()
+            isLoading = false
+            log = result
+            refreshStatus()
+        }
+    }
+}
