@@ -114,21 +114,58 @@ final class JailbreakRuntime {
     /// 打印一段环境摘要（供 AI 分析权限上下文）
     var environmentSummary: String {
         let jailbreakText = isJailbroken ? "是" : "否"
-        let userText = isRoot ? "root（最高权限）" : "非 root（euid=\(currentUID)）"
+        let userText = isRoot ? "root（最高权限）" : "mobile（euid=\(currentUID)）"
         let sandboxText = isSandboxed ? "受限" : "已放宽"
         var lines: [String] = []
         lines.append("越狱环境：\(jailbreakText)")
-        lines.append("当前用户：\(userText)")
+        lines.append("运行用户：\(userText)")
         lines.append("沙盒状态：\(sandboxText)")
         if let jb = jbRootPath {
-            lines.append("越狱根路径：\(jb)")
+            lines.append("越狱根：\(jb)")
+        }
+        // 检测 jbroot 命令是否可用（RootHide 环境）
+        let (jbCode, jbOut) = executeCommand("jbroot", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        if jbCode == 0 {
+            let jbRoot = jbOut.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !jbRoot.isEmpty {
+                lines.append("jbroot: \(jbRoot)（RootHide 路径）")
+                // 检测注入目录
+                let injDir = (jbRoot as NSString).appendingPathComponent("Library/MobileSubstrate/DynamicLibraries")
+                var exists = false
+                injDir.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+                lines.append("注入目录: \(injDir)")
+                lines.append("目录存在: \(exists ? "是" : "否")")
+                if !exists {
+                    lines.append("目录可写: 否（路径不存在）")
+                }
+            }
+        } else {
+            // 兜底：检测传统路径
+            let legacyDir = "/var/jb/Library/MobileSubstrate/DynamicLibraries"
+            var legacyExists = false
+            legacyDir.withCString { ptr in legacyExists = access(ptr, F_OK) == 0 }
+            lines.append("注入目录: \(legacyDir)")
+            lines.append("目录存在: \(legacyExists ? "是" : "否")")
+            if !legacyExists {
+                let writable = FileManager.default.isWritableFile(atPath: "/var/jb")
+                lines.append("目录可写: \(writable ? "是" : "否（权限不足）")")
+            }
         }
         return lines.joined(separator: "\n")
     }
 
-    /// 越狱根路径检测（rootless 越狱为 /var/jb，legacy 为 /）
+    /// 越狱根路径检测（尝试 jbroot 命令，失败则回退到传统路径）
     var jbRootPath: String? {
-        if FileManager.default.fileExists(atPath: "/var/jb") { return "/var/jb" }
+        // 先尝试 jbroot 命令（RootHide）
+        let (code, out) = executeCommand("jbroot", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        if code == 0 {
+            let jbRoot = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !jbRoot.isEmpty { return jbRoot }
+        }
+        // 传统路径
+        var exists = false
+        "/var/jb".withCString { ptr in exists = access(ptr, F_OK) == 0 }
+        if exists { return "/var/jb" }
         if FileManager.default.fileExists(atPath: "/usr/bin/uicache") { return "/" }
         return isJailbroken ? "/" : nil
     }
