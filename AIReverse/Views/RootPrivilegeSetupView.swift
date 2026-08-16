@@ -88,17 +88,23 @@ struct RootPrivilegeSetupView: View {
                             UIPasteboard.general.string = cmd
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("命令 \(index + 1)")
-                                    .font(.caption2)
-                                    .foregroundColor(.blue)
+                                HStack {
+                                    Text("命令 \(index + 1)")
+                                        .font(.caption2)
+                                        .foregroundColor(.blue)
+                                    Spacer()
+                                    Image(systemName: "doc.on.doc")
+                                        .font(.caption2)
+                                        .foregroundColor(.green)
+                                }
                                 Text(cmd)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(.primary)
+                                    .foregroundColor(.green)
                                     .lineLimit(nil)
                                     .multilineTextAlignment(.leading)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
+                            .padding(10)
                             .background(Color(red: 0.12, green: 0.12, blue: 0.13))
                             .cornerRadius(8)
                         }
