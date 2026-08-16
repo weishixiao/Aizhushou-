@@ -26,36 +26,6 @@ struct SettingsHubView: View {
                     )
                 }
             }
-
-            if RootExecutionEnvironment.supportsRootTools {
-                Section {
-                    NavigationLink {
-                        RootTerminalView()
-                    } label: {
-                        featureRow(
-                            icon: "terminal.fill",
-                            color: .orange,
-                            title: "系统终端",
-                            subtitle: "连接已授权的 shell 执行命令"
-                        )
-                    }
-
-                    NavigationLink {
-                        RootFSManagerView()
-                    } label: {
-                        featureRow(
-                            icon: "externaldrive.fill",
-                            color: .indigo,
-                            title: "系统文件管理",
-                            subtitle: "浏览设备文件系统、查看文件属性"
-                        )
-                    }
-                } header: {
-                    Text("授权工具")
-                } footer: {
-                    Text("仅在已授权的越狱或系统执行环境中显示。应用不会提供提权、绕过保护或注入能力。")
-                }
-            }
         }
         .navigationTitle("设置")
         .navigationBarTitleDisplayMode(.inline)

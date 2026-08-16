@@ -16,7 +16,7 @@ if [ ! -d "$APP" ]; then
   exit 1
 fi
 
-echo "==> 嵌入 entitlements（root + 无沙盒，TrollStore 安装保留）..."
+echo "==> 检查 entitlements（如存在则嵌入）..."
 ENTITLEMENTS=AIReverse/AIReverse.entitlements
 if [ -f "$ENTITLEMENTS" ]; then
   BINARY="$APP/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Info.plist")"
