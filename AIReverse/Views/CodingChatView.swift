@@ -663,31 +663,63 @@ struct CodingChatView: View {
 struct DocumentMessageRow: View {
     let message: ChatMessage
 
+    private let aiBubble = Color(red: 0.12, green: 0.12, blue: 0.13)
+    private let userBubble = Color(red: 0.10, green: 0.62, blue: 0.42)
+    private let toolBubble = Color(red: 0.15, green: 0.15, blue: 0.16)
+
     var body: some View {
-        Group {
-            if message.role == .user {
-                HStack {
-                    Spacer(minLength: 60)
-                    Text(message.content)
-                        .font(.system(size: 14))
-                        .lineSpacing(2)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(Color(red: 0.10, green: 0.62, blue: 0.42).opacity(0.12))
-                        .cornerRadius(16)
-                }
-            } else if message.role == .assistant {
-                // 文档式排版：无气泡背景，直接铺开
+        HStack(alignment: .top, spacing: 8) {
+            if message.role == .assistant {
+                // AI 头像
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .frame(width: 28, height: 28)
+                    .background(Color(red: 0.10, green: 0.62, blue: 0.42))
+                    .clipShape(Circle())
+
+                // AI 气泡
                 MarkdownView(content: message.content)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(aiBubble)
+                    .cornerRadius(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            } else if message.role == .tool {
+
+                Spacer(minLength: 40)
+            } else if message.role == .user {
+                Spacer(minLength: 40)
+
+                // 用户气泡
                 Text(message.content)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .padding(10)
-                    .background(Color(.systemGray6))
-                    .cornerRadius(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .font(.system(size: 14))
+                    .lineSpacing(3)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(userBubble)
+                    .cornerRadius(16)
+
+                // 用户头像
+                Image(systemName: "person.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white)
+                    .frame(width: 28, height: 28)
+                    .background(Color.gray.opacity(0.4))
+                    .clipShape(Circle())
+            } else if message.role == .tool {
+                HStack {
+                    Image(systemName: "hammer.fill")
+                        .font(.caption2)
+                        .foregroundColor(.orange)
+                    Text(message.content)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                .padding(10)
+                .background(toolBubble)
+                .cornerRadius(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(message.content)
                     .font(.caption2)
@@ -695,7 +727,7 @@ struct DocumentMessageRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 4)
         .contextMenu {
             Button {
                 UIPasteboard.general.string = message.content

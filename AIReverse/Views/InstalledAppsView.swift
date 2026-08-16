@@ -343,7 +343,7 @@ struct InjectPluginSheet: View {
             rt.setJailbreakOverride(enabled ? true : nil)
         }
         .sheet(isPresented: $showFilePicker) {
-            DocumentPicker(allowedContentTypes: [.init(filenameExtension: "dylib") ?? .item, .init(filenameExtension: "deb") ?? .item]) { url in
+            DocumentPicker(allowedContentTypes: [.item]) { url in
                 importDylib(url)
             }
         }
