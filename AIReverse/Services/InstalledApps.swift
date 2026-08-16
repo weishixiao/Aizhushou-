@@ -107,7 +107,7 @@ final class InstalledApps {
                 bundlePath: appPath,
                 version: version,
                 isSystem: isSystemApp(bundleID: bundleID),
-                icon: icon(for: app)
+                icon: icon(for: app, bundleID: bundleID, bundlePath: appPath)
             ))
         }
 
@@ -139,13 +139,26 @@ final class InstalledApps {
         return bundleID
     }
 
-    private func icon(for app: NSObject) -> UIImage? {
-        // 尝试私有 API iconForApplication:
-        let sel = NSSelectorFromString("iconForApplication:")
-        if app.responds(to: sel),
-           let img = app.perform(sel)?.takeUnretainedValue() as? UIImage {
+    private func icon(for app: NSObject, bundleID: String, bundlePath: String) -> UIImage? {
+        // 1) 优先从 App bundle 路径读取图标（最可靠）
+        if !bundlePath.isEmpty {
+            if let info = loadInfoPlist(at: bundlePath),
+               let img = loadAppIcon(at: bundlePath, from: info) {
+                return img
+            }
+            if let bundle = Bundle(path: bundlePath), let img = bundle.icon {
+                return img
+            }
+        }
+
+        // 2) 尝试 LSApplicationProxy.privateIconForApplication:（部分系统版本可用）
+        let selName = "privateIconForApplication:"
+        if app.responds(to: NSSelectorFromString(selName)),
+           let result = app.perform(NSSelectorFromString(selName), with: bundleID)?.takeUnretainedValue(),
+           let img = result as? UIImage {
             return img
         }
+
         return nil
     }
 
@@ -192,8 +205,53 @@ final class InstalledApps {
     }
 
     private func loadAppIcon(at appPath: String, from info: [String: Any]) -> UIImage? {
-        let bundle = Bundle(path: appPath)
-        return bundle?.icon
+        // 收集候选图标文件名
+        var candidates: [String] = []
+        if let icons = info["CFBundleIcons"] as? [String: Any],
+           let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+           let files = primary["CFBundleIconFiles"] as? [String] {
+            candidates.append(contentsOf: files)
+        }
+        if let icons = info["CFBundleIcons~ipad"] as? [String: Any],
+           let primary = icons["CFBundlePrimaryIcon"] as? [String: Any],
+           let files = primary["CFBundleIconFiles"] as? [String] {
+            candidates.append(contentsOf: files)
+        }
+        if let name = info["CFBundleIconFile"] as? String {
+            candidates.append(name)
+        }
+        if candidates.isEmpty { return nil }
+
+        // 在 bundle 根目录按文件名匹配（含 @2x/@3x/尺寸后缀）
+        if let subpaths = try? FileManager.default.contentsOfDirectory(atPath: appPath) {
+            _ = subpaths
+            for candidate in candidates {
+                let base = (candidate as NSString).deletingPathExtension
+                if let img = findImage(in: appPath, base: base) {
+                    return img
+                }
+            }
+        }
+        return nil
+    }
+
+    /// 在 bundle 目录中按基础名查找图片资产（支持 .png/.png@2x/.png@3x）
+    private func findImage(in dir: String, base: String) -> UIImage? {
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return nil }
+        // 先找精确名称
+        let exact = (base as NSString).appendingPathExtension("png") ?? ""
+        if files.contains(exact), let img = UIImage(contentsOfFile: (dir as NSString).appendingPathComponent(exact)) {
+            return img
+        }
+        // 再找带 scale 后缀
+        for f in files {
+            if f.hasPrefix(base), f.contains("@"), f.hasSuffix(".png") {
+                if let img = UIImage(contentsOfFile: (dir as NSString).appendingPathComponent(f)) {
+                    return img
+                }
+            }
+        }
+        return nil
     }
 }
 

@@ -21,6 +21,7 @@ struct CodingChatView: View {
     // 底部三功能键状态
     @State private var showAppsSheet = false            // 「应用」：注入插件
     @State private var showProcessSheet = false         // 「进程」：发往 AI 破解
+    @State private var targetApp: InstalledApp?          // 「进程」选中的目标应用（停留在聊天界面）
     @State private var showPhotoPicker = false          // 「相册」：调取本机相册
     @State private var hasPhotoAttachment = false
 
@@ -36,6 +37,7 @@ struct CodingChatView: View {
             messageList
             uploadStatusBar
             modelSwitcher
+            targetAppBar
             inputBar
             quickActionsBar
         }
@@ -117,9 +119,9 @@ struct CodingChatView: View {
         // 「进程」：选择应用发往 AI 破解
         .sheet(isPresented: $showProcessSheet) {
             NavigationView {
-                InstalledAppsView(intent: .addressToAI) { app, instruction in
+                InstalledAppsView(intent: .addressToAI) { app in
                     DispatchQueue.main.async {
-                        beginProcessAnalysis(app: app, instruction: instruction)
+                        selectTargetApp(app)
                     }
                 }
             }
@@ -380,6 +382,54 @@ struct CodingChatView: View {
         )
     }
 
+    // MARK: - 目标应用条（进程功能选中后停留在聊天界面）
+
+    @ViewBuilder
+    private var targetAppBar: some View {
+        if let targetApp {
+            HStack(spacing: 8) {
+                if let icon = targetApp.icon {
+                    Image(uiImage: icon)
+                        .resizable()
+                        .frame(width: 22, height: 22)
+                        .cornerRadius(5)
+                } else {
+                    Image(systemName: "app.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("目标：\(targetApp.displayName)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                    Text(targetApp.bundleID)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Button {
+                    clearTargetApp()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(accent.opacity(0.1))
+            .overlay(
+                Rectangle()
+                    .fill(Color.black.opacity(0.04))
+                    .frame(height: 1),
+                alignment: .bottom
+            )
+        }
+    }
+
     // MARK: - 底部三功能键（应用 / 相册 / 进程）
 
     private var quickActionsBar: some View {
@@ -454,20 +504,19 @@ struct CodingChatView: View {
         return url
     }
 
-    /// 「进程」选中应用后，把逆向破解指令发往 AI
-    private func beginProcessAnalysis(app: InstalledApp, instruction: String) {
+    /// 「进程」选中应用后：设置为当前分析目标（停留在聊天界面，由用户发指令）
+    private func selectTargetApp(_ app: InstalledApp) {
         showProcessSheet = false
-        let fullPrompt = instruction + "\n\n[目标应用] \(app.displayName)（\(app.bundleID)）"
-        inputText = ""
+        targetApp = app
+        agent.appendLocalMessage(
+            role: .assistant,
+            content: "已选中目标应用：**\(app.displayName)**（\(app.bundleID)）\n现在可以发送指令给它（例如：分析它的加载逻辑、生成去除广告的插件、修改某个存档等）。"
+        )
+    }
 
-        sendTask = Task { @MainActor in
-            guard let model = modelStore.selectedModel else {
-                agent.errorMessage = "请先在设置中添加并选择模型"
-                return
-            }
-            await agent.sendPrompt(fullPrompt, model: model)
-            sendTask = nil
-        }
+    /// 关闭当前目标应用选择
+    private func clearTargetApp() {
+        targetApp = nil
     }
 
     // MARK: - Actions
@@ -528,12 +577,23 @@ struct CodingChatView: View {
     private func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !agent.isWorking else { return }
+        var prompt = trimmed
+        // 若已选中目标应用，把目标信息注入 AI 上下文（用户指令针对该应用执行）
+        if let targetApp {
+            prompt += """
+
+            【当前目标应用】\(targetApp.displayName)（\(targetApp.bundleID)）
+            路径：\(targetApp.bundlePath)
+            版本：\(targetApp.version)
+            请针对上述目标应用执行我的指令（分析、生成插件、修改数据等）。
+            """
+        }
         sendTask = Task { @MainActor in
             guard let model = modelStore.selectedModel else {
                 agent.errorMessage = "请先在设置中添加并选择模型"
                 return
             }
-            await agent.send(trimmed, model: model)
+            await agent.send(prompt, model: model)
             sendTask = nil
         }
     }

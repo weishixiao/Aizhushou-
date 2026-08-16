@@ -22,8 +22,8 @@ struct InstalledAppsView: View {
 
     @State private var injectingApp: InstalledApp?
 
-    /// 供「进程」模式把目标应用 + 指令回传到主聊天视图
-    var onSendToChat: ((_ app: InstalledApp, _ instruction: String) -> Void)?
+    /// 供「进程」模式把目标应用回传到主聊天视图（停留在主界面，由用户发指令）
+    var onSendToChat: ((_ app: InstalledApp) -> Void)?
 
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
 
@@ -142,26 +142,10 @@ struct InstalledAppsView: View {
         case .injectPlugin:
             injectingApp = app
         case .addressToAI:
-            // 进程模式：把目标应用发给 AI
-            let instructionProposal = analyzeInstruction(for: app)
-            onSendToChat?(app, instructionProposal)
+            // 进程模式：只把目标应用回传给主界面（停留在聊天，用户再发指令）
+            onSendToChat?(app)
             dismiss()
         }
-    }
-
-    /// 进程模式默认推送的逆向指令
-    private func analyzeInstruction(for app: InstalledApp) -> String {
-        return """
-        请对本机应用「\(app.displayName)」进行逆向破解分析：
-        - bundleID：\(app.bundleID)
-        - 路径：\(app.bundlePath)
-        - 版本：\(app.version)
-
-        请先用 list_installed_apps 确认应用，然后：
-        1. 分析目标 app 的二进制与配置，找出可破解点（广告/付费/校验/时长等）
-        2. 根据我的后续指令生成注入插件（inject_plugin）或修改本地数据（modify_app_data）
-        3. 只输出方案；执行前先向我确认。
-        """
     }
 
     private func loadApps() {
@@ -234,6 +218,7 @@ struct InjectPluginSheet: View {
     @State private var isInjecting = false
     @State private var resultMessage: String?
     @State private var errorMessage: String?
+    @State private var forceJailbreak = false
 
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
     private let rt = JailbreakRuntime.shared
@@ -258,8 +243,10 @@ struct InjectPluginSheet: View {
                 Section {
                     keyValueRow("当前权限", value: rt.isRoot ? "Root ✓" : "非 Root")
                     keyValueRow("越狱环境", value: rt.isJailbroken ? "已识别" : "未识别")
+                    Toggle("手动开启越狱模式", isOn: $forceJailbreak)
+                        .font(.callout)
                 } footer: {
-                    Text("需在越狱 / TrollStore 下以最高权限运行才能完成注入。")
+                    Text("自动检测不到时，可手动开启越狱模式以执行注入。需在越狱 / TrollStore 环境下。")
                 }
 
                 if let resultMessage {
@@ -299,6 +286,13 @@ struct InjectPluginSheet: View {
                     .replacingOccurrences(of: "-", with: "_")
                 tweakName = "\(base)_Tweak"
             }
+            // 同步越狱模式开关初值
+            if UserDefaults.standard.object(forKey: JailbreakRuntime.overrideKey) != nil {
+                forceJailbreak = UserDefaults.standard.bool(forKey: JailbreakRuntime.overrideKey)
+            }
+        }
+        .onChange(of: forceJailbreak) { enabled in
+            rt.setJailbreakOverride(enabled ? true : nil)
         }
     }
 

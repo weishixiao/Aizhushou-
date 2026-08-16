@@ -11,6 +11,18 @@ final class JailbreakRuntime {
     static let shared = JailbreakRuntime()
     private init() {}
 
+    /// UserDefaults 手动覆盖越狱标识的 key
+    static let overrideKey = "jailbreak_override_flag"
+
+    /// 手动指定/解除越狱环境（自动检测失败时使用）
+    func setJailbreakOverride(_ value: Bool?) {
+        if let value {
+            UserDefaults.standard.set(value, forKey: Self.overrideKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.overrideKey)
+        }
+    }
+
     // MARK: - 环境探测
 
     /// 当前 euid（0 表示 root）
@@ -31,35 +43,71 @@ final class JailbreakRuntime {
 
     /// 是否为越狱 / TrollStore 环境
     var isJailbroken: Bool {
-        // 常见的越狱痕迹 / 路径
+        // 0) 若用户手动强制指定，以手动值为准（自动检测在沙盒内可能受限）
+        if UserDefaults.standard.object(forKey: Self.overrideKey) != nil {
+            return UserDefaults.standard.bool(forKey: Self.overrideKey)
+        }
+
+        // 1) 越狱特征路径（用 access 而非 fileExists，因为沙盒内 fileExists 对系统路径会误报不存在）
         let indicators: [String] = [
             "/Applications/Cydia.app",
             "/Applications/Sileo.app",
             "/Applications/Zebra.app",
+            "/Applications/Installer.app",
             "/var/jb",                     // rootless (palera1n / Dopamine / RootHide)
             "/usr/libexec/cydia",
+            "/usr/lib/substrate",
+            "/usr/lib/libsubstrate.dylib",
             "/private/var/lib/apt",
             "/var/lib/apt",
             "/.installed_unc0ver",
             "/.bootstrapped_electra",
             "/binpack",
+            "/var/binpack",
+            "/var/lib/cydia",
+            "/var/stash",
         ]
-        for path in indicators where FileManager.default.fileExists(atPath: path) {
+        for path in indicators where pathAccessable(path, mode: F_OK) {
             return true
         }
 
-        // 尝试读写系统路径判断权限
-        let probe = "/private/preboot"
-        if FileManager.default.isWritableFile(atPath: probe) {
+        // 2) 读写系统路径权限（越狱环境对系统可写）
+        let writeProbes = ["/private/preboot", "/var/mobile", "/Library"]
+        for p in writeProbes where FileManager.default.isWritableFile(atPath: p) {
             return true
         }
 
-        // 动态链接注入判断（运行中进程注入的逃逸检测——本工具自身）
-        if dlopen("/usr/lib/libjailbreak.dylib", RTLD_LAZY) != nil {
-            dlclose_hack()
+        // 3) 动态注入库（运行中进程注入）
+        let injectLibs = ["/var/jb/usr/lib/libjailbreak.dylib",
+                          "/usr/lib/libjailbreak.dylib",
+                          "/usr/lib/libsubstrate.dylib",
+                          "/var/jb/usr/lib/libsubstrate.dylib"]
+        for lib in injectLibs {
+            if dlopen(lib, RTLD_LAZY) != nil {
+                dlclose_hack()
+                return true
+            }
+        }
+
+        // 4) 越狱注入库环境变量检测
+        if executableInjected() {
             return true
         }
 
+        return false
+    }
+
+    /// 用 access() 系统调用检测路径存在性（比 fileExists 更贴合越狱环境）
+    private func pathAccessable(_ path: String, mode: Int32) -> Bool {
+        return path.withCString { access($0, mode) == 0 }
+    }
+
+    /// 检测环境变量层面是否有越狱注入
+    private func executableInjected() -> Bool {
+        // DYLD_INSERT_LIBRARIES 常用于越狱注入
+        if let injected = getenv("DYLD_INSERT_LIBRARIES") {
+            return String(cString: injected).count > 0
+        }
         return false
     }
 
