@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTPUT="$SCRIPT_DIR/root_service"
 
 echo "==> 编译 RootService arm64 二进制..."
-clang -arch arm64 "$SCRIPT_DIR/root_service.c" -o "$OUTPUT" -O2 -Wall -Wextra
+clang -arch arm64 "$SCRIPT_DIR/root_service.c.src" -o "$OUTPUT" -O2 -Wall -Wextra
 
 echo "==> 编译成功: $OUTPUT"
 file "$OUTPUT"
