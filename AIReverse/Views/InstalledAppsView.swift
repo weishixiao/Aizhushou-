@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// 底部功能键——「应用」与「进程」共用的已安装应用列表。
 /// 仅展示用户应用（排除 com.apple.* 系统应用），带搜索。
@@ -215,6 +216,9 @@ struct InjectPluginSheet: View {
 
     @State private var tweakName = ""
     @State private var hookSpec = ""
+    @State private var dylibURL: URL?
+    @State private var showFilePicker = false
+    @State private var targetDir = "/var/jb/Library/MobileSubstrate/DynamicLibraries"
     @State private var isInjecting = false
     @State private var resultMessage: String?
     @State private var errorMessage: String?
@@ -222,6 +226,13 @@ struct InjectPluginSheet: View {
 
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
     private let rt = JailbreakRuntime.shared
+
+    private var dylibFileInfo: String? {
+        guard let url = dylibURL else { return nil }
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        let sizeStr = ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        return "\(url.lastPathComponent)（\(sizeStr)）"
+    }
 
     var body: some View {
         NavigationView {
@@ -231,14 +242,39 @@ struct InjectPluginSheet: View {
                     keyValueRow("bundleID", value: app.bundleID)
                 }
                 Section {
-                    TextField("插件名称（如 MyTweak）", text: $tweakName)
-                        .autocapitalization(.none)
-                    TextField("要注入的行为描述", text: $hookSpec)
-                        .font(.callout)
+                    if let info = dylibFileInfo {
+                        HStack {
+                            Image(systemName: "doc.fill")
+                                .foregroundColor(accent)
+                            Text(info)
+                                .font(.callout)
+                            Spacer()
+                            Button("更换") { showFilePicker = true }
+                                .font(.caption)
+                        }
+                    } else {
+                        Button(action: { showFilePicker = true }) {
+                            HStack {
+                                Image(systemName: "square.and.arrow.up")
+                                Text("选择 .dylib 插件文件")
+                            }
+                            .foregroundColor(accent)
+                        }
+                    }
                 } header: {
-                    Text("插件设置")
+                    Text("上传插件")
                 } footer: {
-                    Text("例如：屏蔽广告、跳过登录校验、解锁付费内容、增加金币等")
+                    Text("选择一个已编译好的 .dylib 插件文件（由 Theos / 其他方式编译生成）")
+                }
+                Section {
+                    TextField("注入目录路径", text: $targetDir)
+                        .autocapitalization(.none)
+                        .disableAutocorrection(true)
+                        .font(.system(.body, design: .monospaced))
+                } header: {
+                    Text("注入目录")
+                } footer: {
+                    Text("rootless(Dopamine)：/var/jb/Library/MobileSubstrate/DynamicLibraries\nlegacy 越狱：/Library/MobileSubstrate/DynamicLibraries")
                 }
                 Section {
                     keyValueRow("当前权限", value: rt.isRoot ? "Root ✓" : "非 Root")
@@ -274,19 +310,11 @@ struct InjectPluginSheet: View {
                     Button(isInjecting ? "注入中…" : "开始注入") {
                         startInject()
                     }
-                    .disabled(tweakName.trimmingCharacters(in: .whitespaces).isEmpty || isInjecting)
+                    .disabled(dylibURL == nil || isInjecting)
                 }
             }
         }
         .onAppear {
-            // 默认插件名
-            if tweakName.isEmpty {
-                let base = app.bundleID
-                    .replacingOccurrences(of: ".", with: "_")
-                    .replacingOccurrences(of: "-", with: "_")
-                tweakName = "\(base)_Tweak"
-            }
-            // 同步越狱模式开关初值
             if UserDefaults.standard.object(forKey: JailbreakRuntime.overrideKey) != nil {
                 forceJailbreak = UserDefaults.standard.bool(forKey: JailbreakRuntime.overrideKey)
             }
@@ -294,19 +322,37 @@ struct InjectPluginSheet: View {
         .onChange(of: forceJailbreak) { enabled in
             rt.setJailbreakOverride(enabled ? true : nil)
         }
+        .sheet(isPresented: $showFilePicker) {
+            DocumentPicker(allowedContentTypes: [.init(filenameExtension: "dylib") ?? .item]) { url in
+                importDylib(url)
+            }
+        }
+    }
+
+    private func importDylib(_ url: URL) {
+        // 复制到沙盒文档目录
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let uploads = docs.appendingPathComponent("Uploads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true)
+        let dest = uploads.appendingPathComponent(url.lastPathComponent)
+        try? FileManager.default.copyItem(at: url, to: dest)
+        if FileManager.default.fileExists(atPath: dest.path) {
+            dylibURL = dest
+        }
     }
 
     private func startInject() {
-        let name = tweakName.trimmingCharacters(in: .whitespaces)
-        let spec = hookSpec.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
+        guard let dylibURL else { return }
         isInjecting = true
         resultMessage = nil
         errorMessage = nil
 
+        let dylibPath = dylibURL.path
+        let dir = targetDir.trimmingCharacters(in: .whitespaces)
+
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let msg = try InjectionManager.shared.inject(tweakNamed: name, into: app, hookSpec: spec)
+                let msg = try InjectionManager.shared.injectDylib(at: dylibPath, into: app, targetDir: dir)
                 DispatchQueue.main.async {
                     isInjecting = false
                     resultMessage = msg

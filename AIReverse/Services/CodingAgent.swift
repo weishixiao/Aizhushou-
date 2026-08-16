@@ -68,7 +68,6 @@ final class CodingAgent: ObservableObject {
         registry.register(GitCommitTool())
         // 越狱注入 / 应用分析工具
         registry.register(ListInstalledAppsTool())
-        registry.register(InjectPluginTool())
         registry.register(ModifyAppDataTool())
         restoreConversation()
         restorePendingTask()

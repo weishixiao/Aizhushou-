@@ -28,46 +28,6 @@ final class ListInstalledAppsTool: CodingTool {
     }
 }
 
-/// 对目标应用注入 plugin（修改类）
-final class InjectPluginTool: CodingTool {
-    var name: String { "inject_plugin" }
-    var description: String { "对指定的已安装应用注入插件/外挂。需提供目标应用 bundleID、插件名与 Hook 说明。属于修改类高风险操作。" }
-    var isMutating: Bool { true }
-
-    var parameters: [String: Any] {
-        [
-            "type": "object",
-            "properties": [
-                "bundle_id": ["type": "string", "description": "目标应用 bundleID，如 com.tencent.xin"],
-                "tweak_name": ["type": "string", "description": "插件名称（字母数字下划线）"],
-                "hook_spec": ["type": "string", "description": "要注入的具体行为描述，例如：屏蔽广告、跳过校验、解锁付费等"]
-            ],
-            "required": ["bundle_id", "tweak_name", "hook_spec"]
-        ]
-    }
-
-    func execute(arguments: [String: Any], workspace: WorkspaceManager, github: GitHubAPIClient, repoConfig: GitRepoConfig) async throws -> ToolResult {
-        guard let bundleID = arguments["bundle_id"] as? String, !bundleID.isEmpty else {
-            return ToolResult(success: false, output: "缺少 bundle_id")
-        }
-        guard let tweakName = arguments["tweak_name"] as? String, !tweakName.isEmpty else {
-            return ToolResult(success: false, output: "缺少 tweak_name")
-        }
-        let hookSpec = (arguments["hook_spec"] as? String) ?? ""
-
-        guard let app = InstalledApps.shared.userApps().first(where: { $0.bundleID == bundleID }) else {
-            return ToolResult(success: false, output: "未找到应用：\(bundleID)")
-        }
-
-        do {
-            let msg = try InjectionManager.shared.inject(tweakNamed: tweakName, into: app, hookSpec: hookSpec)
-            return ToolResult(success: true, output: msg)
-        } catch {
-            return ToolResult(success: false, output: error.localizedDescription)
-        }
-    }
-}
-
 /// 修改目标应用关键数据（存档 / 配置……）（修改类）
 final class ModifyAppDataTool: CodingTool {
     var name: String { "modify_app_data" }
