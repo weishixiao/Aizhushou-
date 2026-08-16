@@ -50,8 +50,12 @@ struct InstalledAppsView: View {
         }
         .onAppear(perform: loadApps)
         .sheet(item: $injectingApp) { app in
-            InjectPluginSheet(app: app)
-                .presentationDetents([.medium, .large])
+            if #available(iOS 16.0, *) {
+                InjectPluginSheet(app: app)
+                    .presentationDetents([.medium, .large])
+            } else {
+                InjectPluginSheet(app: app)
+            }
         }
     }
 
@@ -214,7 +218,7 @@ struct AppRow: View {
 
             Image(systemName: "chevron.right")
                 .font(.caption)
-                .foregroundColor(.tertiary)
+                .foregroundColor(.secondary)
         }
         .padding(.vertical, 4)
     }
@@ -241,12 +245,14 @@ struct InjectPluginSheet: View {
                     LabeledContent("目标应用", value: app.displayName)
                     LabeledContent("bundleID", value: app.bundleID)
                 }
-                Section("插件设置") {
+                Section {
                     TextField("插件名称（如 MyTweak）", text: $tweakName)
                         .autocapitalization(.none)
                     TextField("要注入的行为描述", text: $hookSpec, axis: .vertical)
                         .lineLimit(3...6)
                         .font(.callout)
+                } header: {
+                    Text("插件设置")
                 } footer: {
                     Text("例如：屏蔽广告、跳过登录校验、解锁付费内容、增加金币等")
                 }

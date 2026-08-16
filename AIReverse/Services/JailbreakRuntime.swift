@@ -93,14 +93,14 @@ final class JailbreakRuntime {
     // MARK: - root 权限命令执行封装
 
     /// 用当前进程权限（root 时即最高权限）执行外部命令，
-    /// 支持把 stdout/stderr 拼接返回。
+    /// 捕获 stdout+stderr 并拼接返回。
+    /// 使用 posix_spawn（Darwin 原生 API，iOS 必定可用，不依赖 Foundation.Process/system()）。
     @discardableResult
     func executeCommand(_ command: String,
                         arguments: [String] = [],
                         workingDirectory: String? = nil,
                         environment: [String: String] = [:]) -> (exitCode: Int32, output: String) {
-        // 通过 ash -c 组装命令，避免参数转义问题
-        let shell = "/bin/sh"
+        // 通过 /bin/sh -c 组装命令，避免参数转义问题
         let fullCommand: String
         if arguments.isEmpty {
             fullCommand = command
@@ -109,51 +109,51 @@ final class JailbreakRuntime {
             fullCommand = "\(command) \(quoted)"
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: shell)
-        var args = ["-c", fullCommand]
-        // 尝试以 root 身份运行：越狱 rootless 环境常用 setuid(0) 已由 trusted platform 提供，
-        // 这里保留 setuid 探测逻辑，若已为 root 则直接忽略
-        if !isRoot {
-            // 尝试提权（仅当可注入 setuid 辅助时生效，通常不可行，予以忽略）
-            let _ = setuid(0)
-        }
-        process.arguments = args
+        // 输出重定向到临时文件
+        let outFile = "\(NSTemporaryDirectory())cmd_out_\(UUID().uuidString).txt"
+
+        // 组装 shell 命令：支持 cd 与 PATH，输出重定向到临时文件
+        var shellCommand = ""
         if let workingDirectory {
-            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectory)
+            shellCommand += "cd \(shQuote(workingDirectory)); "
+        }
+        var envDict = ProcessInfo.processInfo.environment
+        for (k, v) in environment { envDict[k] = v }
+        envDict["PATH"] = envDict["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        if let path = envDict["PATH"], !path.isEmpty {
+            shellCommand += "export PATH=\(shQuote(path)); "
+        }
+        shellCommand += fullCommand
+        shellCommand += " > \(shQuote(outFile)) 2>&1"
+
+        // 构造 argv / envp（C 字符串数组）
+        var argv: [UnsafeMutablePointer<CChar>?] = [strdup("-c"), strdup(shellCommand)]
+        argv.append(nil)
+        defer {
+            for arg in argv { if let a = arg { free(a) } }
         }
 
-        // 注入环境变量
-        var env = ProcessInfo.processInfo.environment
-        for (k, v) in environment {
-            env[k] = v
-        }
-        env["PATH"] = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        process.environment = env
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        var outputData = Data()
-        let handle = pipe.fileHandleForReading
-        handle.readabilityHandler = { handler in
-            let data = handler.availableData
-            if data.isEmpty { return }
-            outputData.append(data)
+        var cEnv: [UnsafeMutablePointer<CChar>?] = envDict.map { strdup("\($0.key)=\($0.value)") }
+        cEnv.append(nil)
+        defer {
+            for e in cEnv { if let e { free(e) } }
         }
 
-        var exitCode: Int32 = -1
-        do {
-            try process.run()
-            process.waitUntilExit()
-            exitCode = process.terminationStatus
-        } catch {
-            return (errorCode: errno, output: error.localizedDescription)
+        // spawn /bin/sh
+        var pid: pid_t = 0
+        let spawnResult = posix_spawn(&pid, "/bin/sh", nil, nil, argv, cEnv)
+        guard spawnResult == 0 else {
+            return (exitCode: spawnResult, output: "posix_spawn 失败 (error=\(spawnResult))")
         }
-        handle.readabilityHandler = nil
-        let output = String(data: outputData, encoding: .utf8) ?? ""
 
+        // 等待子进程结束
+        var status: Int32 = 0
+        waitpid(pid, &status, 0)
+        let exitCode = (status >> 8) & 0xFF
+
+        // 读取输出
+        let output = (try? String(contentsOfFile: outFile, encoding: .utf8)) ?? ""
+        try? FileManager.default.removeItem(atPath: outFile)
         return (exitCode, output)
     }
 

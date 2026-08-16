@@ -70,7 +70,8 @@ final class InstalledApps {
     private func listViaLSApplicationWorkspace() -> [InstalledApp]? {
         let className = "LSApplicationWorkspace"
         guard let workspaceClass: AnyClass = NSClassFromString(className),
-              let workspace = workspaceClass.perform(NSSelectorFromString("defaultWorkspace"))?.takeUnretainedValue() as? NSObject
+              let defaultWorkspace = workspaceClass.perform(NSSelectorFromString("defaultWorkspace")),
+              let workspace = defaultWorkspace.takeUnretainedValue() as? NSObject
         else {
             return nil
         }
