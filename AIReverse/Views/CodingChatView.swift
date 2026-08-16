@@ -18,6 +18,12 @@ struct CodingChatView: View {
     @State private var uploadError: String?
     @State private var sendTask: Task<Void, Never>?
 
+    // 底部三功能键状态
+    @State private var showAppsSheet = false            // 「应用」：注入插件
+    @State private var showProcessSheet = false         // 「进程」：发往 AI 破解
+    @State private var showPhotoPicker = false          // 「相册」：调取本机相册
+    @State private var hasPhotoAttachment = false
+
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
     private let packageExtensions: Set<String> = ["ipa", "tipa", "deb", "dylib", "apk"]
 
@@ -31,6 +37,7 @@ struct CodingChatView: View {
             uploadStatusBar
             modelSwitcher
             inputBar
+            quickActionsBar
         }
         .background(backgroundColor.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
@@ -94,6 +101,28 @@ struct CodingChatView: View {
             DocumentPicker(allowedContentTypes: [.item], onPick: { url in
                 importPackageFile(url)
             })
+        }
+        // 「相册」：调取本机相册
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPicker(maxSelection: 1) { images in
+                handlePhotoPicked(images)
+            }
+        }
+        // 「应用」：选择应用注入插件
+        .sheet(isPresented: $showAppsSheet) {
+            NavigationView {
+                InstalledAppsView(intent: .injectPlugin)
+            }
+        }
+        // 「进程」：选择应用发往 AI 破解
+        .sheet(isPresented: $showProcessSheet) {
+            NavigationView {
+                InstalledAppsView(intent: .addressToAI) { app, instruction in
+                    DispatchQueue.main.async {
+                        beginProcessAnalysis(app: app, instruction: instruction)
+                    }
+                }
+            }
         }
         .onAppear {
             if agent.messages.isEmpty {
@@ -351,6 +380,96 @@ struct CodingChatView: View {
         )
     }
 
+    // MARK: - 底部三功能键（应用 / 相册 / 进程）
+
+    private var quickActionsBar: some View {
+        HStack(spacing: 0) {
+            quickActionButton(
+                title: "应用",
+                icon: "app.badge.fill",
+                action: { showAppsSheet = true }
+            )
+            quickActionButton(
+                title: "相册",
+                icon: "photo.on.rectangle.angled",
+                action: { showPhotoPicker = true }
+            )
+            quickActionButton(
+                title: "进程",
+                icon: "cpu",
+                action: { showProcessSheet = true }
+            )
+        }
+        .padding(.vertical, 7)
+        .background(backgroundColor)
+        .overlay(
+            Rectangle()
+                .fill(Color.black.opacity(0.05))
+                .frame(height: 1),
+            alignment: .top
+        )
+    }
+
+    private func quickActionButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(accent)
+                Text(title)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(agent.isWorking)
+    }
+
+    /// 「相册」选择到图片后的处理：保存到沙盒并注入会话上下文
+    private func handlePhotoPicked(_ images: [UIImage]) {
+        guard let first = images.first else { return }
+        hasPhotoAttachment = true
+        if let data = first.jpegData(compressionQuality: 0.8) {
+            let hash = String(format: "%06d", Int(Date().timeIntervalSince1970) % 1000000)
+            let fileName = "photo_\(hash).jpg"
+            if let url = savePhotoData(data, name: fileName) {
+                guard let dim = ImageDimension.from(data: data) else { return }
+                agent.appendLocalMessage(
+                    role: .user,
+                    content: "已从相册添加图片：\(fileName)（尺寸 \(dim.width)x\(dim.height)）"
+                )
+                agent.appendLocalMessage(role: .assistant, content: "已接收图片，你可以告诉我需要对这张图片做什么，例如 OCR 识别、构图分析等。")
+            }
+        }
+    }
+
+    private func savePhotoData(_ data: Data, name: String) -> URL? {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
+        let uploads = docs.appendingPathComponent("Uploads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true)
+        let url = uploads.appendingPathComponent(name)
+        try? data.write(to: url)
+        return url
+    }
+
+    /// 「进程」选中应用后，把逆向破解指令发往 AI
+    private func beginProcessAnalysis(app: InstalledApp, instruction: String) {
+        showProcessSheet = false
+        let fullPrompt = instruction + "\n\n[目标应用] \(app.displayName)（\(app.bundleID)）"
+        inputText = ""
+
+        sendTask = Task { @MainActor in
+            guard let model = modelStore.selectedModel else {
+                agent.errorMessage = "请先在设置中添加并选择模型"
+                return
+            }
+            await agent.sendPrompt(fullPrompt, model: model)
+            sendTask = nil
+        }
+    }
+
     // MARK: - Actions
 
     private var sendButtonColor: Color {
@@ -550,5 +669,21 @@ struct DocumentMessageRow: View {
         formatter.locale = Locale(identifier: "zh_Hans_CN")
         formatter.dateFormat = "yyyy年M月d日 HH:mm:ss"
         return formatter.string(from: message.date)
+    }
+}
+
+/// 从 JPEG/PNG 二进制读取图像尺寸的轻量辅助
+fileprivate struct ImageDimension: CustomStringConvertible {
+    let width: Int
+    let height: Int
+
+    var description: String { "\(width)x\(height)" }
+
+    static func from(data: Data) -> ImageDimension? {
+        // 优先用 UIImage 取尺寸（最可靠）
+        if let img = UIImage(data: data) {
+            return ImageDimension(width: Int(img.size.width), height: Int(img.size.height))
+        }
+        return nil
     }
 }

@@ -66,6 +66,10 @@ final class CodingAgent: ObservableObject {
         registry.register(RepoOverviewTool())
         registry.register(WriteFileTool())
         registry.register(GitCommitTool())
+        // 越狱注入 / 应用分析工具
+        registry.register(ListInstalledAppsTool())
+        registry.register(InjectPluginTool())
+        registry.register(ModifyAppDataTool())
         restoreConversation()
         restorePendingTask()
     }
@@ -73,6 +77,13 @@ final class CodingAgent: ObservableObject {
     /// 发送用户消息并驱动工具调用循环
     func send(_ userText: String, model: AIModelConfig) async {
         let text = userText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !isWorking else { return }
+        await runConversation(model: model, userText: text, appendUserMessage: true)
+    }
+
+    /// 把指定指令文本直接发进会话（供「进程」入口将目标应用 + 破解指令推送给 AI）
+    func sendPrompt(_ prompt: String, model: AIModelConfig) async {
+        let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isWorking else { return }
         await runConversation(model: model, userText: text, appendUserMessage: true)
     }
