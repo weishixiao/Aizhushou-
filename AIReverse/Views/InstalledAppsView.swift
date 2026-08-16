@@ -233,12 +233,6 @@ struct InjectPluginSheet: View {
         case rootless = "Dopamine / palera1n（rootless）"
         case legacy = "unc0ver / Taurine（传统越狱）"
         var id: Self { self }
-        var libraryPath: String {
-            switch self {
-            case .rootless: return "/var/jb/Library/MobileSubstrate/DynamicLibraries"
-            case .legacy:   return "/Library/MobileSubstrate/DynamicLibraries"
-            }
-        }
     }
 
     private var dylibFileInfo: String? {
@@ -292,7 +286,7 @@ struct InjectPluginSheet: View {
                             .foregroundColor(.secondary)
                             .font(.caption)
                         Spacer()
-                        Text(jailbreakType.libraryPath)
+                        Text(jailbreakType == .rootless ? "/var/jb/Library/MobileSubstrate/DynamicLibraries" : "/Library/MobileSubstrate/DynamicLibraries")
                             .font(.system(.caption, design: .monospaced))
                             .foregroundColor(.primary)
                     }
@@ -455,13 +449,35 @@ struct InjectPluginSheet: View {
         guard let dylibURL else { return }
         let dylibPath = dylibURL.path
         let ext = dylibURL.pathExtension.lowercased()
-        // 如果选的是 .deb 但未解压出 dylib，报错
         if ext == "deb" && !dylibPath.hasSuffix(".dylib") {
             errorMessage = "无法从 .deb 包中提取 dylib 文件，请确认 deb 内包含 .dylib 插件"
             return
         }
-        // 直接使用硬编码的路径，彻底避免字符串截断问题
-        let dir = jailbreakType.libraryPath
+        // 用字符数组构建路径，防止编译器对字符串常量的任何优化/截断
+        let dir: String = {
+            switch jailbreakType {
+            case .rootless:
+                var path = "/"
+                path += "var"
+                path += "/"
+                path += "jb"
+                path += "/"
+                path += "Library"
+                path += "/"
+                path += "MobileSubstrate"
+                path += "/"
+                path += "DynamicLibraries"
+                return path
+            case .legacy:
+                var path = "/"
+                path += "Library"
+                path += "/"
+                path += "MobileSubstrate"
+                path += "/"
+                path += "DynamicLibraries"
+                return path
+            }
+        }()
 
         isInjecting = true
         resultMessage = nil
