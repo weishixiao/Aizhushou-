@@ -232,6 +232,7 @@ struct InjectPluginSheet: View {
     private enum JBType: String, CaseIterable, Identifiable {
         case rootless = "Dopamine / palera1n（rootless）"
         case legacy = "unc0ver / Taurine（传统越狱）"
+        case roothide = "Relaxin（RootHide）"
         var id: Self { self }
     }
 
@@ -286,7 +287,7 @@ struct InjectPluginSheet: View {
                             .foregroundColor(.secondary)
                             .font(.caption)
                         Spacer()
-                        Text(jailbreakType == .rootless ? "/var/jb/Library/MobileSubstrate/DynamicLibraries" : "/Library/MobileSubstrate/DynamicLibraries")
+                        Text(jailbreakType == .rootless ? "/var/jb/Library/MobileSubstrate/DynamicLibraries" : jailbreakType == .legacy ? "/Library/MobileSubstrate/DynamicLibraries" : "jbroot 命令动态获取")
                             .font(.system(.caption, design: .monospaced))
                             .foregroundColor(.primary)
                     }
@@ -453,31 +454,37 @@ struct InjectPluginSheet: View {
             errorMessage = "无法从 .deb 包中提取 dylib 文件，请确认 deb 内包含 .dylib 插件"
             return
         }
-        // 用字符数组构建路径，防止编译器对字符串常量的任何优化/截断
+        // 构建注入目录路径
         let dir: String = {
             switch jailbreakType {
             case .rootless:
+                // 字符拼接，防止编译器截断字符串常量
                 var path = "/"
-                path += "var"
-                path += "/"
-                path += "jb"
-                path += "/"
-                path += "Library"
-                path += "/"
-                path += "MobileSubstrate"
-                path += "/"
+                path += "var"; path += "/"
+                path += "jb"; path += "/"
+                path += "Library"; path += "/"
+                path += "MobileSubstrate"; path += "/"
                 path += "DynamicLibraries"
                 return path
             case .legacy:
                 var path = "/"
-                path += "Library"
-                path += "/"
-                path += "MobileSubstrate"
-                path += "/"
+                path += "Library"; path += "/"
+                path += "MobileSubstrate"; path += "/"
                 path += "DynamicLibraries"
                 return path
+            case .roothide:
+                // 通过 jbroot 命令获取 RootHide 真实路径
+                let (code, output) = rt.executeCommand("jbroot /Library/MobileSubstrate/DynamicLibraries", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+                if code == 0 {
+                    let jbPath = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !jbPath.isEmpty { return jbPath }
+                }
+                // 如果 jbroot 命令失败，提示用户
+                errorMessage = "无法获取 RootHide 注入目录，请确认：\n1. TrollStore 中已开启 App 的所有权限\n2. 设备已越狱\n3. 可尝试选择其他越狱类型"
+                return ""
             }
         }()
+        if dir.isEmpty { return }
 
         isInjecting = true
         resultMessage = nil
