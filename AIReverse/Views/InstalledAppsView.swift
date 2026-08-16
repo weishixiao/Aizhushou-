@@ -242,14 +242,13 @@ struct InjectPluginSheet: View {
         NavigationView {
             Form {
                 Section {
-                    LabeledContent("目标应用", value: app.displayName)
-                    LabeledContent("bundleID", value: app.bundleID)
+                    keyValueRow("目标应用", value: app.displayName)
+                    keyValueRow("bundleID", value: app.bundleID)
                 }
                 Section {
                     TextField("插件名称（如 MyTweak）", text: $tweakName)
                         .autocapitalization(.none)
-                    TextField("要注入的行为描述", text: $hookSpec, axis: .vertical)
-                        .lineLimit(3...6)
+                    TextField("要注入的行为描述", text: $hookSpec)
                         .font(.callout)
                 } header: {
                     Text("插件设置")
@@ -257,8 +256,8 @@ struct InjectPluginSheet: View {
                     Text("例如：屏蔽广告、跳过登录校验、解锁付费内容、增加金币等")
                 }
                 Section {
-                    LabeledContent("当前权限", value: rt.isRoot ? "Root ✓" : "非 Root")
-                    LabeledContent("越狱环境", value: rt.isJailbroken ? "已识别" : "未识别")
+                    keyValueRow("当前权限", value: rt.isRoot ? "Root ✓" : "非 Root")
+                    keyValueRow("越狱环境", value: rt.isJailbroken ? "已识别" : "未识别")
                 } footer: {
                     Text("需在越狱 / TrollStore 下以最高权限运行才能完成注入。")
                 }
@@ -324,6 +323,18 @@ struct InjectPluginSheet: View {
                     errorMessage = error.localizedDescription
                 }
             }
+        }
+    }
+
+    /// iOS15 兼容的「标题-值」行
+    private func keyValueRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundColor(.primary)
+            Spacer()
+            Text(value)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.trailing)
         }
     }
 }
