@@ -264,7 +264,7 @@ struct InjectPluginSheet: View {
                 } header: {
                     Text("上传插件")
                 } footer: {
-                    Text("选择一个已编译好的 .dylib 插件文件（由 Theos / 其他方式编译生成）")
+                    Text("选择一个已编译好的 .dylib 或 .deb 插件文件（由 Theos 或其他方式编译生成）")
                 }
                 Section {
                     TextField("注入目录路径", text: $targetDir)
@@ -334,7 +334,7 @@ struct InjectPluginSheet: View {
             rt.setJailbreakOverride(enabled ? true : nil)
         }
         .sheet(isPresented: $showFilePicker) {
-            DocumentPicker(allowedContentTypes: [.init(filenameExtension: "dylib") ?? .item]) { url in
+            DocumentPicker(allowedContentTypes: [.init(filenameExtension: "dylib") ?? .item, .init(filenameExtension: "deb") ?? .item]) { url in
                 importDylib(url)
             }
         }
@@ -348,17 +348,108 @@ struct InjectPluginSheet: View {
         let dest = uploads.appendingPathComponent(url.lastPathComponent)
         try? FileManager.default.copyItem(at: url, to: dest)
         if FileManager.default.fileExists(atPath: dest.path) {
-            dylibURL = dest
+            if url.pathExtension.lowercased() == "deb" {
+                // 尝试解压 deb 提取 dylib
+                extractDylibFromDeb(dest)
+            } else {
+                dylibURL = dest
+            }
         }
+    }
+
+    /// 尝试从 .deb 包中提取 .dylib 文件
+    private func extractDylibFromDeb(_ debURL: URL) {
+        let debPath = debURL.path
+        let extractDir = debURL.deletingLastPathComponent().appendingPathComponent("extracted_\(debURL.lastPathComponent)")
+        try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+        let extractPath = extractDir.path
+
+        // deb 是 ar 归档，内部包含 data.tar.xz（或 .gz/.lzma），再解压得到文件
+        // 用系统命令逐层解压
+        let rt = JailbreakRuntime.shared
+        // 1. 解包 deb（ar 格式）
+        let arCmd = "ar x \(debPath) --output=\(extractPath)"
+        let (arCode, _) = rt.executeCommand(arCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        guard arCode == 0 else {
+            // ar 可能不可用，尝试用 dpkg-deb
+            let dpkgCmd = "dpkg-deb -x \(debPath) \(extractPath)"
+            let (dpkgCode, _) = rt.executeCommand(dpkgCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+            guard dpkgCode == 0 else {
+                dylibURL = nil
+                return
+            }
+            // 解压后找到第一个 .dylib
+            if let found = findFirstDylib(in: extractPath) {
+                dylibURL = URL(fileURLWithPath: found)
+            }
+            return
+        }
+
+        // 2. 找到 data.tar.*
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: extractPath) else { return }
+        var dataTar: String?
+        for f in files where f.hasPrefix("data.tar") {
+            dataTar = (extractPath as NSString).appendingPathComponent(f)
+        }
+        guard let dataTar else {
+            // 尝试直接找 dylib
+            if let found = findFirstDylib(in: extractPath) {
+                dylibURL = URL(fileURLWithPath: found)
+            }
+            return
+        }
+
+        // 3. 解压 data.tar（根据后缀选择解压方式）
+        let dataTarName = (dataTar as NSString).lastPathComponent
+        let dataDir = (extractPath as NSString).appendingPathComponent("data")
+        try? FileManager.default.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
+
+        let uncompressCmd: String
+        if dataTarName.hasSuffix(".xz") {
+            uncompressCmd = "tar -xJf \(dataTar) -C \(dataDir)"
+        } else if dataTarName.hasSuffix(".gz") {
+            uncompressCmd = "tar -xzf \(dataTar) -C \(dataDir)"
+        } else if dataTarName.hasSuffix(".lzma") {
+            uncompressCmd = "tar -xf \(dataTar) --lzma -C \(dataDir)"
+        } else {
+            uncompressCmd = "tar -xf \(dataTar) -C \(dataDir)"
+        }
+        let (tarCode, _) = rt.executeCommand(uncompressCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        guard tarCode == 0 else {
+            if let found = findFirstDylib(in: extractPath) {
+                dylibURL = URL(fileURLWithPath: found)
+            }
+            return
+        }
+
+        // 4. 从 data 目录找 .dylib
+        if let found = findFirstDylib(in: dataDir) {
+            dylibURL = URL(fileURLWithPath: found)
+        }
+    }
+
+    /// 递归在目录中查找第一个 .dylib 文件
+    private func findFirstDylib(in dir: String) -> String? {
+        guard let enumerator = FileManager.default.enumerator(atPath: dir) else { return nil }
+        for case let path as String in enumerator where path.hasSuffix(".dylib") {
+            return (dir as NSString).appendingPathComponent(path)
+        }
+        return nil
     }
 
     private func startInject() {
         guard let dylibURL else { return }
+        let dylibPath = dylibURL.path
+        let ext = dylibURL.pathExtension.lowercased()
+        // 如果选的是 .deb 但未解压出 dylib，报错
+        if ext == "deb" && !dylibPath.hasSuffix(".dylib") {
+            errorMessage = "无法从 .deb 包中提取 dylib 文件，请确认 deb 内包含 .dylib 插件"
+            return
+        }
         isInjecting = true
         resultMessage = nil
         errorMessage = nil
 
-        let dylibPath = dylibURL.path
         let dir = targetDir.trimmingCharacters(in: .whitespaces)
 
         DispatchQueue.global(qos: .userInitiated).async {
