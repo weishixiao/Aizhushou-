@@ -373,68 +373,81 @@ struct InjectPluginSheet: View {
         try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
         let extractPath = extractDir.path
 
-        // deb 是 ar 归档，内部包含 data.tar.xz（或 .gz/.lzma），再解压得到文件
-        // 用系统命令逐层解压
+        // 用 Python 脚本解压 deb（不依赖 ar 命令，兼容 iOS 越狱环境）
+        let pythonScript = """
+import sys, os, tarfile, struct
+
+def extract_deb(deb_path, out_dir):
+    '''手动解压 .deb（ar 归档格式）'''
+    with open(deb_path, 'rb') as f:
+        # 验证 ar 签名
+        magic = f.read(8)
+        if magic != b'!<arch>\\n':
+            sys.exit(2)
+        
+        # 遍历 ar 文件成员
+        while True:
+            header = f.read(60)
+            if len(header) < 60:
+                break
+            name = header[:16].decode('ascii', errors='replace').strip()
+            size_str = header[48:58].decode('ascii', errors='replace').strip()
+            try:
+                size = int(size_str)
+            except:
+                break
+            
+            data = f.read(size)
+            if len(data) < size:
+                break
+            # 对齐
+            if size % 2 != 0:
+                f.read(1)
+            
+            if name.startswith('data.tar'):
+                # 解压 data.tar
+                tar_path = os.path.join(out_dir, name)
+                with open(tar_path, 'wb') as tf:
+                    tf.write(data)
+                # 解压 tar
+                with tarfile.open(tar_path) as tar:
+                    tar.extractall(path=out_dir)
+                os.remove(tar_path)
+                sys.exit(0)
+        
+        sys.exit(3)
+
+if __name__ == '__main__':
+    extract_deb(sys.argv[1], sys.argv[2])
+"""
+        let scriptPath = (NSTemporaryDirectory() as NSString).appendingPathComponent("extract_deb.py")
+        try? pythonScript.write(toFile: scriptPath, atomically: true, encoding: .utf8)
+
         let rt = JailbreakRuntime.shared
-        // 1. 解包 deb（ar 格式）
-        let arCmd = "ar x \(debPath) --output=\(extractPath)"
-        let (arCode, _) = rt.executeCommand(arCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-        guard arCode == 0 else {
-            // ar 可能不可用，尝试用 dpkg-deb
-            let dpkgCmd = "dpkg-deb -x \(debPath) \(extractPath)"
-            let (dpkgCode, _) = rt.executeCommand(dpkgCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-            guard dpkgCode == 0 else {
-                dylibURL = nil
+        let (pyCode, _) = rt.executeCommand("python3 \(scriptPath) \(debPath) \(extractPath)", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"])
+        try? FileManager.default.removeItem(atPath: scriptPath)
+
+        if pyCode == 0 {
+            // 递归查找 dylib
+            if let found = findFirstDylib(in: extractPath) {
+                dylibURL = URL(fileURLWithPath: found)
                 return
             }
-            // 解压后找到第一个 .dylib
-            if let found = findFirstDylib(in: extractPath) {
-                dylibURL = URL(fileURLWithPath: found)
+        }
+
+        // 如果 Python 解压失败，尝试用 dpkg-deb（越狱环境）
+        if pyCode != 0 {
+            let (dpkgCode, _) = rt.executeCommand("dpkg-deb -x \(debPath) \(extractPath)", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+            if dpkgCode == 0 {
+                if let found = findFirstDylib(in: extractPath) {
+                    dylibURL = URL(fileURLWithPath: found)
+                    return
+                }
             }
-            return
         }
 
-        // 2. 找到 data.tar.*
-        guard let files = try? FileManager.default.contentsOfDirectory(atPath: extractPath) else { return }
-        var dataTar: String?
-        for f in files where f.hasPrefix("data.tar") {
-            dataTar = (extractPath as NSString).appendingPathComponent(f)
-        }
-        guard let dataTar else {
-            // 尝试直接找 dylib
-            if let found = findFirstDylib(in: extractPath) {
-                dylibURL = URL(fileURLWithPath: found)
-            }
-            return
-        }
-
-        // 3. 解压 data.tar（根据后缀选择解压方式）
-        let dataTarName = (dataTar as NSString).lastPathComponent
-        let dataDir = (extractPath as NSString).appendingPathComponent("data")
-        try? FileManager.default.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
-
-        let uncompressCmd: String
-        if dataTarName.hasSuffix(".xz") {
-            uncompressCmd = "tar -xJf \(dataTar) -C \(dataDir)"
-        } else if dataTarName.hasSuffix(".gz") {
-            uncompressCmd = "tar -xzf \(dataTar) -C \(dataDir)"
-        } else if dataTarName.hasSuffix(".lzma") {
-            uncompressCmd = "tar -xf \(dataTar) --lzma -C \(dataDir)"
-        } else {
-            uncompressCmd = "tar -xf \(dataTar) -C \(dataDir)"
-        }
-        let (tarCode, _) = rt.executeCommand(uncompressCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-        guard tarCode == 0 else {
-            if let found = findFirstDylib(in: extractPath) {
-                dylibURL = URL(fileURLWithPath: found)
-            }
-            return
-        }
-
-        // 4. 从 data 目录找 .dylib
-        if let found = findFirstDylib(in: dataDir) {
-            dylibURL = URL(fileURLWithPath: found)
-        }
+        // 全部失败
+        dylibURL = nil
     }
 
     /// 递归在目录中查找第一个 .dylib 文件
