@@ -80,6 +80,19 @@ struct RootPrivilegeSetupView: View {
                 .foregroundColor(.red)
             }
 
+            // RootService 状态
+            Section("RootService 后台服务") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("📡 双进程架构：主 App(mobile) ↔ RootService(root)")
+                        .font(.caption).foregroundColor(.secondary)
+                    Text("Socket: /var/mobile/Library/aireverse_service.sock")
+                        .font(.system(size: 11, design: .monospaced)).foregroundColor(.secondary)
+                    Text("编译: clang -arch arm64 root_service.c -o root_service")
+                        .font(.system(size: 11, design: .monospaced)).foregroundColor(.orange)
+                }
+                .padding(.vertical, 4)
+            }
+
             // 命令列表（可单独复制）
             if !commands.isEmpty {
                 Section("手动执行命令（点击复制到剪贴板）") {
@@ -129,11 +142,11 @@ struct RootPrivilegeSetupView: View {
 
             // 说明
             Section("说明") {
-                Text("Relaxin 环境唯一稳定的 root 提权方案。由系统 launchd 以 root 身份拉起 App 二进制，桌面图标通过 URL Scheme 唤起前台 UI。")
-                    .font(.caption).foregroundColor(.secondary)
-                Text("⚠️ 不可尝试 SetUID（AMFI 拦截）或移动 App 到 /Applications（无效）")
-                    .font(.caption).foregroundColor(.orange)
-                Text("🔧 开发阶段建议用 NewTerm root 启动测试；正式版用此 LaunchDaemon 方案")
+                Text("⚠️ 重要：iOS17 RootHide 环境下 LaunchDaemon 启动的进程无法渲染图形 UI。")
+                    .font(.caption).foregroundColor(.red).bold()
+                Text("✅ 推荐采用「双进程架构」：主 App（mobile）正常显示 UI，通过 UNIX Socket 与 root 权限后台服务通信。")
+                    .font(.caption).foregroundColor(.green)
+                Text("📋 编译 RootService 后部署到 /var/mobile/，在 NewTerm 中启动即可。")
                     .font(.caption).foregroundColor(.secondary)
                 Text("📖 URL Scheme: aireverse://root（桌面图标点击可唤起 UI）")
                     .font(.caption).foregroundColor(.blue)

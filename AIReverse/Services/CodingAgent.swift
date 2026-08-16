@@ -70,6 +70,7 @@ final class CodingAgent: ObservableObject {
         registry.register(ListInstalledAppsTool())
         registry.register(ModifyAppDataTool())
         registry.register(SetupRootPrivilegeTool())
+        registry.register(RootServiceTool())
         restoreConversation()
         restorePendingTask()
     }

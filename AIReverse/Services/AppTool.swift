@@ -154,3 +154,36 @@ final class SetupRootPrivilegeTool: CodingTool {
         }
     }
 }
+
+/// RootService 通信工具：通过 UNIX Socket 与 root 权限后台服务交互
+final class RootServiceTool: CodingTool {
+    var name: String { "root_service" }
+    var description: String { "通过 UNIX Socket 与 root 权限后台服务(RootService)通信。所有需要 root 权限的操作（进程枚举、Frida 注入、dylib 注入、文件读写等）都通过此工具下发。指令格式：CMD_PING 心跳, CMD_LIST_APPS 枚举进程, CMD_ROOT_INFO 查询 root 身份, CMD_SHELL <命令> 执行任意 shell 命令, CMD_FRIDA <参数> Frida 操作, CMD_INJECT bundle_id|dylib_path 注入 dylib。也可直接发送 shell 命令字符串。" }
+    var isMutating: Bool { true }
+
+    var parameters: [String: Any] {
+        [
+            "type": "object",
+            "properties": [
+                "command": [
+                    "type": "string",
+                    "description": "发送给 RootService 的指令字符串"
+                ]
+            ],
+            "required": ["command"]
+        ]
+    }
+
+    func execute(arguments: [String: Any], workspace: WorkspaceManager, github: GitHubAPIClient, repoConfig: GitRepoConfig) async throws -> ToolResult {
+        guard let command = arguments["command"] as? String else {
+            return ToolResult(success: false, output: "缺少 command 参数")
+        }
+        let client = RootServiceClient.shared
+        do {
+            let result = try client.execute(command)
+            return ToolResult(success: true, output: result)
+        } catch {
+            return ToolResult(success: false, output: "RootService 通信失败: \(error.localizedDescription)\n\n先在 NewTerm 启动:\n1. su root\n2. export DYLD_INSERT_LIBRARIES=/var/jb/usr/lib/ellekit/ellekit.dylib\n3. /var/mobile/root_service")
+        }
+    }
+}
