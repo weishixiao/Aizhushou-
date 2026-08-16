@@ -140,10 +140,10 @@ final class SetupRootPrivilegeTool: CodingTool {
         switch action {
         case "setup":
             let result = mgr.setupDaemon()
-            return ToolResult(success: true, output: result)
+            return ToolResult(success: true, output: result.log)
         case "teardown":
             let result = mgr.teardownDaemon()
-            return ToolResult(success: true, output: result)
+            return ToolResult(success: true, output: result.log)
         case "status":
             let status = mgr.daemonStatus()
             let runningText = status.isRunning ? "运行中" : "未运行"

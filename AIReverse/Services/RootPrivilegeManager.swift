@@ -16,6 +16,12 @@ import Darwin
 /// - 不可尝试 rootful 旧教程（Relaxin 不兼容）
 ///
 /// 开发阶段建议：全程用 NewTerm root 启动测试；正式版用 LaunchDaemon + URL Scheme。
+
+/// 操作结果：包含日志文本和可单独复制的命令列表
+struct DaemonSetupResult {
+    let log: String
+    let commands: [String]
+}
 final class RootPrivilegeManager {
     static let shared = RootPrivilegeManager()
     private init() {}
@@ -154,10 +160,10 @@ final class RootPrivilegeManager {
     }
 
     /// 执行 LaunchDaemon 安装并启动
-    /// - Returns: 包含操作日志的多行字符串
-    func setupDaemon() -> String {
+    func setupDaemon() -> DaemonSetupResult {
         let binaryPath = appBinaryPath
         var log = [String]()
+        var cmds = [String]()
         log.append("▸ 检测二进制路径: \(binaryPath)")
 
         let shellPath = rootShellPath
@@ -167,37 +173,51 @@ final class RootPrivilegeManager {
         var binExists = false
         binaryPath.withCString { ptr in binExists = access(ptr, F_OK) == 0 }
         if !binExists {
-            return "❌ 二进制路径不存在: \(binaryPath)\n请先用 TrollStore 安装 App"
+            return DaemonSetupResult(
+                log: "❌ 二进制路径不存在: \(binaryPath)\n请先用 TrollStore 安装 App",
+                commands: []
+            )
         }
         log.append("✓ 二进制路径已确认")
 
         // 1. 创建目录
         guard let dir = launchDaemonDir else {
-            return "❌ 无法确定 LaunchDaemons 目录路径"
+            return DaemonSetupResult(
+                log: "❌ 无法确定 LaunchDaemons 目录路径",
+                commands: []
+            )
         }
         let createDirCmd = "mkdir -p \(shQuote(dir))"
-        let (createCode, createOut) = rt.executeCommand(createDirCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
+        let (createCode, _) = rt.executeCommand(createDirCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
         if createCode != 0 {
             // mobile 用户无权限创建目录，提供手动命令
+            let plistContent = daemonPlistContent(binaryPath: binaryPath)
             log.append("⚠️ 自动创建目录失败（mobile 权限不足）")
             log.append("")
-            log.append("📋 请在 NewTerm 中执行以下命令手动配置：")
+            log.append("📋 请在 NewTerm 中逐条复制执行以下命令：")
             log.append("")
-            log.append("=== 步骤 1：创建目录 ===")
-            log.append("mkdir -p \(dir)")
+            log.append("--- 步骤 1：创建目录 ---")
+            log.append(createDirCmd)
             log.append("")
-            log.append("=== 步骤 2：创建 plist 配置文件 ===")
+            log.append("--- 步骤 2：创建 plist ---")
             log.append("cat > \(shQuote(daemonPlistPath)) << 'PLISTEOF'")
-            log.append(daemonPlistContent(binaryPath: binaryPath))
+            log.append(plistContent)
             log.append("PLISTEOF")
             log.append("")
-            log.append("=== 步骤 3：设置权限并加载 ===")
+            log.append("--- 步骤 3：权限 + 加载 ---")
             log.append("chown root:wheel \(shQuote(daemonPlistPath))")
             log.append("launchctl load \(shQuote(daemonPlistPath))")
             log.append("launchctl start \(Self.daemonLabel)")
             log.append("")
             log.append("🔑 root shell: \(shellPath)")
-            return log.joined(separator: "\n")
+
+            cmds.append(createDirCmd)
+            cmds.append("cat > \(shQuote(daemonPlistPath)) << 'PLISTEOF'\n\(plistContent)\nPLISTEOF")
+            cmds.append("chown root:wheel \(shQuote(daemonPlistPath))")
+            cmds.append("launchctl load \(shQuote(daemonPlistPath))")
+            cmds.append("launchctl start \(Self.daemonLabel)")
+
+            return DaemonSetupResult(log: log.joined(separator: "\n"), commands: cmds)
         }
         log.append("✓ 目录已创建: \(dir)")
 
@@ -208,7 +228,10 @@ final class RootPrivilegeManager {
             try plistContent.write(toFile: plistPath, atomically: true, encoding: .utf8)
             log.append("✓ plist 已写入: \(plistPath)")
         } catch {
-            return "❌ 写入 plist 失败: \(error.localizedDescription)"
+            return DaemonSetupResult(
+                log: "❌ 写入 plist 失败: \(error.localizedDescription)",
+                commands: []
+            )
         }
 
         // 3. 设置权限 chown root:wheel
@@ -244,7 +267,7 @@ final class RootPrivilegeManager {
         }
         if !loaded {
             log.append("⚠️ 自动加载失败，请手动运行: launchctl load \(plistPath)")
-            return log.joined(separator: "\n")
+            return DaemonSetupResult(log: log.joined(separator: "\n"), commands: [])
         }
 
         // 6. 启动守护
@@ -261,12 +284,13 @@ final class RootPrivilegeManager {
         log.append("📋 桌面图标点击唤起 UI，后台守护进程以 root 身份运行")
         log.append("🔑 root shell: \(shellPath)")
 
-        return log.joined(separator: "\n")
+        return DaemonSetupResult(log: log.joined(separator: "\n"), commands: [])
     }
 
     /// 停止并卸载 LaunchDaemon
-    func teardownDaemon() -> String {
+    func teardownDaemon() -> DaemonSetupResult {
         var log = [String]()
+        var cmds = [String]()
         let rt = JailbreakRuntime.shared
 
         // 停止
@@ -284,7 +308,7 @@ final class RootPrivilegeManager {
         let (rmCode, _) = rt.executeCommand(rmCmd, environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
         log.append(rmCode == 0 ? "✓ 配置文件已删除" : "⚠️ 删除失败")
 
-        return log.joined(separator: "\n")
+        return DaemonSetupResult(log: log.joined(separator: "\n"), commands: cmds)
     }
 
     /// 检查守护进程当前状态

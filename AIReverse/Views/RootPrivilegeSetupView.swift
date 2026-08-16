@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootPrivilegeSetupView: View {
     @State private var log = ""
+    @State private var commands: [String] = []
     @State private var isLoading = false
     @State private var statusInfo: (label: String, isRunning: Bool, details: [String]) = ("", false, [])
     @State private var envInfo = ""
@@ -79,6 +80,33 @@ struct RootPrivilegeSetupView: View {
                 .foregroundColor(.red)
             }
 
+            // 命令列表（可单独复制）
+            if !commands.isEmpty {
+                Section("手动执行命令（点击复制到剪贴板）") {
+                    ForEach(Array(commands.enumerated()), id: \.offset) { index, cmd in
+                        Button {
+                            UIPasteboard.general.string = cmd
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("命令 \(index + 1)")
+                                    .font(.caption2)
+                                    .foregroundColor(.blue)
+                                Text(cmd)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.primary)
+                                    .lineLimit(nil)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(Color(red: 0.12, green: 0.12, blue: 0.13))
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
             // 日志
             Section("操作日志") {
                 if log.isEmpty {
@@ -90,13 +118,6 @@ struct RootPrivilegeSetupView: View {
                         .foregroundColor(.secondary)
                         .lineSpacing(2)
                         .textSelection(.enabled)
-                        .contextMenu {
-                            Button {
-                                UIPasteboard.general.string = log
-                            } label: {
-                                Label("复制全部日志", systemImage: "doc.on.doc")
-                            }
-                        }
                 }
             }
 
@@ -127,10 +148,12 @@ struct RootPrivilegeSetupView: View {
     private func setupDaemon() {
         isLoading = true
         log = "正在配置 LaunchDaemon...\n\n"
+        commands = []
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
             let result = RootPrivilegeManager.shared.setupDaemon()
             isLoading = false
-            log = result
+            log = result.log
+            commands = result.commands
             refreshStatus()
         }
     }
@@ -138,10 +161,12 @@ struct RootPrivilegeSetupView: View {
     private func teardownDaemon() {
         isLoading = true
         log = "正在停止守护进程...\n\n"
+        commands = []
         DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) {
             let result = RootPrivilegeManager.shared.teardownDaemon()
             isLoading = false
-            log = result
+            log = result.log
+            commands = result.commands
             refreshStatus()
         }
     }
