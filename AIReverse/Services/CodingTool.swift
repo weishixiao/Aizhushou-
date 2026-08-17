@@ -163,11 +163,6 @@ struct GitRepoConfig: Codable, Equatable {
     }
 }
 
-/// 最小分析存储，供旧入口编译使用
-final class AnalysisStore: ObservableObject {
-    @Published var notes: String = ""
-}
-
 /// 本地工作区工具适配
 final class CodingWorkspace {
     static let shared = CodingWorkspace()
