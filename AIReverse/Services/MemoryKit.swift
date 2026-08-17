@@ -117,7 +117,7 @@ final class MemoryTool {
 
         switch type {
         case .u8:
-            guard let v = UInt8(value) else { throw MemoryError.invalidValue }
+            let v = try parseUInt8(value)
             var rs = mt_result_set_t()
             mt_result_init(&rs)
             defer { mt_result_free(&rs) }
@@ -125,7 +125,7 @@ final class MemoryTool {
             return collectResult(&rs)
 
         case .u16:
-            guard let v = UInt16(value) else { throw MemoryError.invalidValue }
+            let v = try parseUInt16(value)
             var rs = mt_result_set_t()
             mt_result_init(&rs)
             defer { mt_result_free(&rs) }
@@ -133,7 +133,7 @@ final class MemoryTool {
             return collectResult(&rs)
 
         case .u32:
-            guard let v = UInt32(value) else { throw MemoryError.invalidValue }
+            let v = try parseUInt32(value)
             var rs = mt_result_set_t()
             mt_result_init(&rs)
             defer { mt_result_free(&rs) }
@@ -141,7 +141,7 @@ final class MemoryTool {
             return collectResult(&rs)
 
         case .u64:
-            guard let v = UInt64(value) else { throw MemoryError.invalidValue }
+            let v = try parseUInt64(value)
             var rs = mt_result_set_t()
             mt_result_init(&rs)
             defer { mt_result_free(&rs) }
@@ -165,6 +165,37 @@ final class MemoryTool {
             mt_scan_aob_all(ctx, pattern, mask, patLen, &rs)
             return collectResult(&rs)
         }
+    }
+
+    // MARK: - 数值解析（支持十进制和十六进制 0x）
+
+    private func parseUInt8(_ value: String) throws -> UInt8 {
+        if let v = UInt8(value) { return v }
+        guard let v = UInt8(stripHexPrefix(value), radix: 16) else { throw MemoryError.invalidValue }
+        return v
+    }
+
+    private func parseUInt16(_ value: String) throws -> UInt16 {
+        if let v = UInt16(value) { return v }
+        guard let v = UInt16(stripHexPrefix(value), radix: 16) else { throw MemoryError.invalidValue }
+        return v
+    }
+
+    private func parseUInt32(_ value: String) throws -> UInt32 {
+        if let v = UInt32(value) { return v }
+        guard let v = UInt32(stripHexPrefix(value), radix: 16) else { throw MemoryError.invalidValue }
+        return v
+    }
+
+    private func parseUInt64(_ value: String) throws -> UInt64 {
+        if let v = UInt64(value) { return v }
+        guard let v = UInt64(stripHexPrefix(value), radix: 16) else { throw MemoryError.invalidValue }
+        return v
+    }
+
+    private func stripHexPrefix(_ value: String) -> String {
+        let s = value.trimmingCharacters(in: .whitespaces)
+        return s.hasPrefix("0x") || s.hasPrefix("0X") ? String(s.dropFirst(2)) : s
     }
 
     private func collectResult(_ rs: UnsafeMutablePointer<mt_result_set_t>) -> [UInt64] {
@@ -318,19 +349,19 @@ final class MemoryTool {
 
         switch scanType {
         case .u32:
-            guard let v = UInt32(value) else { throw MemoryError.invalidValue }
+            let v = try parseUInt32(value)
             try writeU32(address: address, value: v)
         case .u64:
-            guard let v = UInt64(value) else { throw MemoryError.invalidValue }
+            let v = try parseUInt64(value)
             try writeU64(address: address, value: v)
         case .f32:
             guard let v = Float(value) else { throw MemoryError.invalidValue }
             try writeF32(address: address, value: v)
         case .u8:
-            guard let v = UInt8(value) else { throw MemoryError.invalidValue }
+            let v = try parseUInt8(value)
             try writeU8(address: address, value: v)
         case .u16:
-            guard let v = UInt16(value) else { throw MemoryError.invalidValue }
+            let v = try parseUInt16(value)
             try writeU16(address: address, value: v)
         case .aob:
             throw MemoryError.notSupported("AoB 类型不支持直接写入，请先扫描定位")
