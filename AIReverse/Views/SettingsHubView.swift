@@ -47,6 +47,17 @@ struct SettingsHubView: View {
                         subtitle: "查看、复制与清空应用运行日志"
                     )
                 }
+
+                NavigationLink {
+                    InjectionDetectView()
+                } label: {
+                    featureRow(
+                        icon: "shield.lefthalf.filled",
+                        color: .red,
+                        title: "注入检测",
+                        subtitle: "4 种原理检测当前进程注入，监控运行时 dylib 加载"
+                    )
+                }
             }
         }
         .navigationTitle("设置")
