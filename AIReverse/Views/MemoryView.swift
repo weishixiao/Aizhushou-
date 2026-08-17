@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 内存修改工具箱 UI
 ///
@@ -503,3 +504,12 @@ struct MemoryView_Preview: PreviewProvider {
     }
 }
 #endif
+
+// MARK: - 通用 View 扩展
+
+extension View {
+    /// 占满父视图可用宽度
+    func flexibleWidth() -> some View {
+        frame(maxWidth: .infinity)
+    }
+}

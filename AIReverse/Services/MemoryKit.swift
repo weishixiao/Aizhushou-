@@ -200,10 +200,11 @@ final class MemoryTool {
 
     private func collectResult(_ rs: UnsafeMutablePointer<mt_result_set_t>) -> [UInt64] {
         if rs.pointee.count == 0 { return [] }
+        guard let addrsPtr = rs.pointee.addrs else { return [] }
         var result = [UInt64]()
         result.reserveCapacity(Int(rs.pointee.count))
         for i in 0..<rs.pointee.count {
-            result.append(UInt64(rs.pointee.addrs[Int(i)]))
+            result.append(UInt64(addrsPtr[Int(i)]))
         }
         return result
     }
@@ -218,7 +219,7 @@ final class MemoryTool {
                 self.scanType = type
                 self.lastScanValue = value
                 self.scanResults = addrs.map { addr in
-                    ScanResult(address: addr, currentValue: self.readValueAt(addr, type: type) ?? "0x\(addr, radix: 16)")
+                    ScanResult(address: addr, currentValue: self.readValueAt(addr, type: type) ?? "0x" + String(addr, radix: 16))
                 }
                 self.scanCount = addrs.count
                 self.isScanning = false
@@ -238,11 +239,13 @@ final class MemoryTool {
             guard !scanResults.isEmpty else { throw MemoryError.noResults }
 
             var rs = mt_result_set_t()
-            rs.addrs = UnsafeMutablePointer<mach_vm_address_t>.allocate(capacity: Int(scanResults.count))
-            rs.count = UInt64(scanResults.count)
-            rs.capacity = UInt64(scanResults.count)
-            for i, r in scanResults.enumerated() {
-                rs.addrs[Int(i)] = mach_vm_address_t(r.address)
+            let addrCount = scanResults.count
+            rs.addrs = UnsafeMutablePointer<mach_vm_address_t>.allocate(capacity: addrCount)
+            rs.count = UInt64(addrCount)
+            rs.capacity = UInt64(addrCount)
+            guard let addrsPtr = rs.addrs else { throw MemoryError.contextNotInitialized }
+            for (i, r) in scanResults.enumerated() {
+                addrsPtr[Int(i)] = mach_vm_address_t(r.address)
             }
 
             let count: size_t
@@ -260,12 +263,13 @@ final class MemoryTool {
             var results = [ScanResult]()
             results.reserveCapacity(Int(count))
             for i in 0..<count {
+                let addr = addrsPtr[Int(i)]
                 results.append(ScanResult(
-                    address: UInt64(rs.addrs[Int(i)]),
-                    currentValue: readValueAt(UInt64(rs.addrs[Int(i)]), type: scanType) ?? "0x\(rs.addrs[Int(i)], radix: 16)"
+                    address: UInt64(addr),
+                    currentValue: readValueAt(UInt64(addr), type: scanType) ?? "0x" + String(addr, radix: 16)
                 ))
             }
-            rs.addrs.deallocate()
+            addrsPtr.deallocate()
             scanResults = results
             scanCount = results.count
             return results.count
@@ -377,8 +381,9 @@ final class MemoryTool {
         try serialQueue.sync {
             guard let ctx = ctx else { throw MemoryError.contextNotInitialized }
             var outAddr: mach_vm_address_t = 0
-            let result = mt_follow_pointer(ctx, mach_vm_address_t(base),
-                                            UnsafePointer<uint64_t>(offsets), offsets.count, &outAddr)
+            let result = offsets.withUnsafeBufferPointer { buf in
+                mt_follow_pointer(ctx, mach_vm_address_t(base), buf.baseAddress, size_t(offsets.count), &outAddr)
+            }
             guard result else { throw MemoryError.pointerChainFailed(base) }
             return UInt64(outAddr)
         }
@@ -479,10 +484,10 @@ enum MemoryError: Error, LocalizedError {
         case .invalidValue: return "无效的值"
         case .invalidAoB: return "无效的 AoB 格式（至少需 2 字节，格式如 FF 00 ??）"
         case .noResults: return "无扫描结果"
-        case .writeFailed(let addr): return "写入失败: 0x\(addr, radix: 16)"
+        case .writeFailed(let addr): return "写入失败: 0x" + String(addr, radix: 16)
         case .notSupported(let msg): return msg
-        case .pointerChainFailed(let base): return "指针链追踪失败: 0x\(base, radix: 16)"
-        case .patchFailed(let addr): return "代码 Patch 失败: 0x\(addr, radix: 16)"
+        case .pointerChainFailed(let base): return "指针链追踪失败: 0x" + String(base, radix: 16)
+        case .patchFailed(let addr): return "代码 Patch 失败: 0x" + String(addr, radix: 16)
         }
     }
 }
