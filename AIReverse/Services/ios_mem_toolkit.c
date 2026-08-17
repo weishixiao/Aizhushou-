@@ -8,20 +8,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <mach/mach_vm.h>
+#include <TargetConditionals.h>
 #include <mach/vm_region.h>
 #include <mach/vm_page_size.h>
 
 // ============================================================
-// 平台兼容层：模拟器 SDK 没有 mach_vm_* 函数系列，映射到 vm_* 系列
-// 注意：只替换函数名，不替换类型名。mach_vm_address_t / mach_vm_size_t
-// 在模拟器 SDK 中有定义，类型本身可用。
+// 平台兼容层
+// 注意：iOS SDK 的 <mach/mach_vm.h> 标注为 unsupported（App Store 限制），
+// 只有 macOS 才提供 mach_vm_* 系列。iOS 真机与模拟器统一映射到 vm_* 系列
+// （函数名不同，地址/大小类型在 arm64 下同为 64 位）。
 // ============================================================
 
-#if TARGET_OS_SIMULATOR || (defined(__x86_64__) && !defined(__arm64__))
+#if defined(TARGET_OS_OSX) && TARGET_OS_OSX
 
-    // 模拟器：用 vm_* 系列函数替代 mach_vm_*
-    // vm_region_64 签名与 mach_vm_region 一致
+    // macOS：mach_vm.h 可用
+    #include <mach/mach_vm.h>
+
+#else
+
+    // iOS 真机 / 模拟器：用 vm_* 系列函数替代 mach_vm_*
     #define mach_vm_region         vm_region_64
     #define mach_vm_read_overwrite vm_read_overwrite
     #define mach_vm_write          vm_write
@@ -110,7 +115,7 @@ void mt_enumerate_rw_regions(mt_ctx_t *ctx, mt_region_cb cb, void *user_data) {
 
     while (1) {
         kern_return_t kr = mach_vm_region(
-            ctx->task, &addr, &size,
+            ctx->task, (vm_address_t *)&addr, (vm_size_t *)&size,
             VM_REGION_BASIC_INFO_64,
             (vm_region_info_t)&info, &info_count, &object_name);
         if (kr != KERN_SUCCESS) break;
@@ -153,7 +158,7 @@ static void scan_region_aob_single(vm_map_t task,
 
         mach_vm_size_t bytes_read = 0;
         kern_return_t kr = mach_vm_read_overwrite(task, cur, to_read,
-                                                   (mach_vm_address_t)buf, &bytes_read);
+                                                   (mach_vm_address_t)buf, (vm_size_t *)&bytes_read);
         if (kr != KERN_SUCCESS || bytes_read < pat_len) {
             cur += to_read;
             continue;
@@ -206,7 +211,7 @@ static void scan_region_aob_multi(vm_map_t task,
 
         mach_vm_size_t bytes_read = 0;
         kern_return_t kr = mach_vm_read_overwrite(task, cur, to_read,
-                                                   (mach_vm_address_t)buf, &bytes_read);
+                                                   (mach_vm_address_t)buf, (vm_size_t *)&bytes_read);
         if (kr != KERN_SUCCESS || bytes_read < pat_len) {
             cur += to_read;
             continue;
@@ -254,7 +259,7 @@ bool mt_scan_aob(mt_ctx_t *ctx,
 
     while (1) {
         kern_return_t kr = mach_vm_region(
-            ctx->task, &addr, &size,
+            ctx->task, (vm_address_t *)&addr, (vm_size_t *)&size,
             VM_REGION_BASIC_INFO_64,
             (vm_region_info_t)&info, &info_count, &object_name);
         if (kr != KERN_SUCCESS) break;
@@ -307,7 +312,7 @@ bool mt_scan_aob_all(mt_ctx_t *ctx,
 
     while (1) {
         kern_return_t kr = mach_vm_region(
-            ctx->task, &addr, &size,
+            ctx->task, (vm_address_t *)&addr, (vm_size_t *)&size,
             VM_REGION_BASIC_INFO_64,
             (vm_region_info_t)&info, &info_count, &object_name);
         if (kr != KERN_SUCCESS) break;
@@ -412,7 +417,7 @@ bool mt_read(mt_ctx_t *ctx, mach_vm_address_t addr, void *buf, size_t len) {
     if (!ctx || !buf || len == 0) return false;
     mach_vm_size_t bytes_read = 0;
     kern_return_t kr = mach_vm_read_overwrite(ctx->task, addr, len,
-                                               (mach_vm_address_t)buf, &bytes_read);
+                                               (mach_vm_address_t)buf, (vm_size_t *)&bytes_read);
     return kr == KERN_SUCCESS && bytes_read == len;
 }
 
