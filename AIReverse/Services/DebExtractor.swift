@@ -79,18 +79,13 @@ enum DebExtractor {
     }
 
     private static func inflateGzip(_ data: Data) throws -> Data {
-        if let raw = try? inflateZlib(data, algorithm: COMPRESSION_ZLIB), !raw.isEmpty {
-            return raw
+        guard let raw = try? inflateZlib(data), !raw.isEmpty else {
+            throw DebExtractError(message: "gzip 数据解压失败")
         }
-        // 剥离 gzip 头后用 raw deflate 重试
-        if let stripped = stripGzipHeader(data),
-           let raw = try? inflateZlib(stripped, algorithm: COMPRESSION_RAW), !raw.isEmpty {
-            return raw
-        }
-        throw DebExtractError(message: "gzip 数据解压失败")
+        return raw
     }
 
-    private static func inflateZlib(_ data: Data, algorithm: compression_algorithm) throws -> Data {
+    private static func inflateZlib(_ data: Data) throws -> Data {
         guard !data.isEmpty else { return Data() }
         var capacity = max(data.count * 4, 65536)
         let maxCapacity = 512 * 1024 * 1024
@@ -102,7 +97,7 @@ enum DebExtractor {
                 return compression_decode_buffer(
                     dst, capacity,
                     base.assumingMemoryBound(to: UInt8.self), data.count,
-                    nil, algorithm
+                    nil, COMPRESSION_ZLIB
                 )
             }
             if written > 0 {
@@ -111,31 +106,6 @@ enum DebExtractor {
             capacity *= 2
         }
         throw DebExtractError(message: "数据解压超过 512MB 上限")
-    }
-
-    /// RFC1952 gzip 头剥离（FLG/FEXTRA/FNAME/FCOMMENT/FHCRC）
-    private static func stripGzipHeader(_ data: Data) -> Data? {
-        guard data.count >= 10, data[0] == 0x1f, data[1] == 0x8b else { return nil }
-        var offset = 10
-        let flags = data[3]
-        if flags & 0x04 != 0 {
-            guard data.count >= offset + 2 else { return nil }
-            let xlen = Int(data[offset]) | (Int(data[offset + 1]) << 8)
-            offset += 2 + xlen
-        }
-        if flags & 0x08 != 0 {
-            while offset < data.count && data[offset] != 0 { offset += 1 }
-            offset += 1
-        }
-        if flags & 0x10 != 0 {
-            while offset < data.count && data[offset] != 0 { offset += 1 }
-            offset += 1
-        }
-        if flags & 0x02 != 0 {
-            offset += 2
-        }
-        guard offset <= data.count else { return nil }
-        return data.subdata(in: offset..<data.count)
     }
 
     // MARK: - tar 解析（ustar + GNU LongLink）
