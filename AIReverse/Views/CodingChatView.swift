@@ -332,7 +332,6 @@ struct CodingChatView: View {
 
                 if #available(iOS 16.0, *) {
                     TextField("发送消息，或上传 ipa / tipa / deb / dylib / apk...", text: $inputText, axis: .vertical)
-                        .lineLimit(1...5)
                         .font(.system(size: 15))
                         .padding(.vertical, 10)
                 } else {

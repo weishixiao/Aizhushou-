@@ -34,4 +34,4 @@ cp -R "$APP" build/Payload/
 echo "==> 生成 AIReverse.ipa ..."
 ditto -c -k --keepParent build/Payload build/AIReverse.ipa
 echo "完成: $(pwd)/build/AIReverse.ipa"
-echo "用 TrollStore 打开该 .ipa 即可安装。"
+echo "用 TrollStore 或 Relaxin 安装该 .ipa 即可。"
