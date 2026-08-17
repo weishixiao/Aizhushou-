@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <mach/mach_vm.h>
+#include <mach/vm_region.h>
+#include <mach/vm_page_size.h>
 
 // ============================================================
 // 平台兼容层：模拟器 SDK 没有 mach_vm_* 函数系列，映射到 vm_* 系列

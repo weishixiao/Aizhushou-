@@ -20,6 +20,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <mach/mach.h>
+#include <mach/mach_vm.h>
 
 #ifdef __cplusplus
 extern "C" {
