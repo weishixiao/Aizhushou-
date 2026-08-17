@@ -1,5 +1,6 @@
 import Foundation
 import zlib
+import Compression
 
 struct DebExtractError: LocalizedError {
     let message: String
@@ -77,10 +78,60 @@ enum DebExtractor {
         if name.hasSuffix(".gz") || (data.count > 2 && data[0] == 0x1f && data[1] == 0x8b) {
             return try zlibInflate(data)
         }
-        if name.hasSuffix(".xz") || name.hasSuffix(".zst") || name.hasSuffix(".lzma") {
-            throw DebExtractError(message: "deb 使用 \(name) 压缩，本机需安装 dpkg-deb 解压")
+        if name.hasSuffix(".lzma") || (data.count > 1 && data[0] == 0x5d) {
+            return try lzmaDecompress(data)
+        }
+        if name.hasSuffix(".xz") {
+            throw DebExtractError(message: "deb 使用 xz 压缩（data.tar.xz），暂不支持，请使用 gzip 压缩的 deb")
+        }
+        if name.hasSuffix(".bz2") {
+            throw DebExtractError(message: "deb 使用 bzip2 压缩（data.tar.bz2），暂不支持，请使用 gzip 压缩的 deb")
+        }
+        if name.hasSuffix(".zst") {
+            throw DebExtractError(message: "deb 使用 zstd 压缩（data.tar.zst），暂不支持，请使用 gzip 压缩的 deb")
         }
         return data
+    }
+
+    /// 用 libcompression 流式解压 LZMA-alone（.lzma 格式，含 13 字节头），
+    /// 完整输出到结束标记，避免单次缓冲解压截断。
+    private static func lzmaDecompress(_ data: Data) throws -> Data {
+        guard data.count >= 13 else {
+            throw DebExtractError(message: "LZMA 数据过短（缺少头部）")
+        }
+        var stream = compression_stream(dst_ptr: nil, dst_size: 0, src_ptr: nil, src_size: 0, state: nil)
+        let initStatus = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_LZMA)
+        guard initStatus != COMPRESSION_STATUS_ERROR else {
+            throw DebExtractError(message: "LZMA 解压器初始化失败")
+        }
+        defer { compression_stream_destroy(&stream) }
+
+        let chunkSize = 262144
+        var dst = [UInt8](repeating: 0, count: chunkSize)
+        var output = Data()
+        let src = data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> UnsafePointer<UInt8> in
+            raw.baseAddress!.assumingMemoryBound(to: UInt8.self)
+        }
+        var srcIndex = 0
+        var status: compression_status = COMPRESSION_STATUS_OK
+        repeat {
+            stream.src_ptr = src.advanced(by: srcIndex)
+            stream.src_size = data.count - srcIndex
+            stream.dst_ptr = dst.withUnsafeMutableBufferPointer { $0.baseAddress }
+            stream.dst_size = chunkSize
+            status = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
+            let written = chunkSize - Int(stream.dst_size)
+            if written > 0 {
+                output.append(dst.prefix(written))
+            }
+            let prevSrcIndex = srcIndex
+            srcIndex = data.count - Int(stream.src_size)
+            if written == 0 && srcIndex == prevSrcIndex { break }
+        } while status == COMPRESSION_STATUS_OK
+        guard status == COMPRESSION_STATUS_END else {
+            throw DebExtractError(message: "LZMA 解压失败（status=\(status.rawValue)）")
+        }
+        return output
     }
 
     /// 用 libz 流式解压 gzip/zlib（windowBits=47 自动识别 gzip 头），完整输出，避免截断。
