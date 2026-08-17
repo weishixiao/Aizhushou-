@@ -32,12 +32,13 @@ Entries discovered by the Agent during task execution should follow this format:
 ## Entries
 
 [iOS Build Verification Environment]
-- Date: 2026-08-14
+- Date: 2026-08-17 (updated)
 - Context: Discovered by Agent while optimizing AIReverse parsing code
 - Category: Environment Configuration
 - Instructions:
-  - Current workspace container does not provide `swift` or `xcodebuild`; local Swift typecheck and Xcode build verification are unavailable here.
-  - Validate iOS builds on a Mac/Xcode environment or through the existing GitHub Actions workflow.
+  - Current workspace container does not provide `swift` or `xcodebuild` by default; Xcode build verification is unavailable here.
+  - Swift typecheck is possible: download Swift 5.10+ Linux toolchain to /opt/swift, provide a stub MachO module (e.g. /tmp/opencode/mock), then run `swiftc -typecheck -I <mock-dir> <file>.swift` to catch type errors.
+  - Validate full iOS builds on a Mac/Xcode environment or through the existing GitHub Actions workflow.
 
 [Confirm Before Commit And Packaging]
 - Date: 2026-08-14

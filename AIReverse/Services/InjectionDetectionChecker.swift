@@ -201,7 +201,7 @@ public class InjectionDetectionChecker {
 
         // dyld_all_image_infos 内存布局：version(UInt32) + infoArrayCount(UInt32) + infoArray(指针)
         // task_dyld_info 结构体没有 count 字段，从内存中的 infoArrayCount 读取
-        guard let infosPtr = UnsafeRawPointer(bitPattern: headerAddr) else {
+        guard let infosPtr = UnsafeRawPointer(bitPattern: UInt(headerAddr)) else {
             return DetectionResult(method: .machTaskInfo, found: false,
                                    details: "无法读取 dyld_all_image_infos", suspectedLibs: [])
         }
@@ -218,7 +218,7 @@ public class InjectionDetectionChecker {
             let infoAddr = headerAddr + UInt64(offset)
 
             // 从内存中读取 dyld_image_info
-            guard let headerPtr = UnsafeRawPointer(bitPattern: infoAddr) else { continue }
+            guard let headerPtr = UnsafeRawPointer(bitPattern: UInt(infoAddr)) else { continue }
 
             // 读取 image_addr (第一个字段, 8 bytes)
             let imageAddr = headerPtr.loadUnaligned(as: UInt64.self)
