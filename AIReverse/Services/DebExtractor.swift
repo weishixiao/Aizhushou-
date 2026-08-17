@@ -1,5 +1,5 @@
 import Foundation
-import Compression
+import zlib
 
 struct DebExtractError: LocalizedError {
     let message: String
@@ -75,10 +75,7 @@ enum DebExtractor {
 
     private static func decompressTar(data: Data, name: String) throws -> Data {
         if name.hasSuffix(".gz") || (data.count > 2 && data[0] == 0x1f && data[1] == 0x8b) {
-            return try inflateStream(data, algorithm: COMPRESSION_ZLIB)
-        }
-        if name.hasSuffix(".bz2") || (data.count > 3 && data[0] == 0x42 && data[1] == 0x5a && data[2] == 0x68) {
-            return try inflateStream(data, algorithm: COMPRESSION_BZIP2)
+            return try zlibInflate(data)
         }
         if name.hasSuffix(".xz") || name.hasSuffix(".zst") || name.hasSuffix(".lzma") {
             throw DebExtractError(message: "deb 使用 \(name) 压缩，本机需安装 dpkg-deb 解压")
@@ -86,45 +83,39 @@ enum DebExtractor {
         return data
     }
 
-    /// 流式解压 gzip/zlib/bzip2 数据（COMPRESSION_ZLIB 自动识别 gzip 头），
-    /// 输出按需分块，避免一次性 buffer 不足导致截断。
-    private static func inflateStream(_ data: Data, algorithm: compression_algorithm) throws -> Data {
+    /// 用 libz 流式解压 gzip/zlib（windowBits=47 自动识别 gzip 头），完整输出，避免截断。
+    private static func zlibInflate(_ data: Data) throws -> Data {
         guard !data.isEmpty else { return Data() }
 
-        var stream = compression_stream()
-        let initStatus = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, algorithm)
-        guard initStatus == COMPRESSION_STATUS_OK else {
-            throw DebExtractError(message: "初始化解压器失败")
+        var stream = z_stream()
+        let srcPtr = data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> UnsafePointer<Bytef>? in
+            raw.baseAddress?.assumingMemoryBound(to: Bytef.self)
         }
-        defer { compression_stream_destroy(&stream) }
+        stream.next_in = UnsafeMutablePointer<Bytef>(mutating: srcPtr)
+        stream.avail_in = uInt(data.count)
 
-        let srcBuffer = [UInt8](data)
-        stream.src_ptr = srcBuffer.withUnsafeBufferPointer { $0.baseAddress }
-        stream.src_size = srcBuffer.count
-        stream.dst_size = 0
+        let initStatus = inflateInit2_(&stream, 47, "1.2.11", Int32(MemoryLayout<z_stream>.size))
+        guard initStatus == Z_OK else {
+            throw DebExtractError(message: "初始化解压器失败 (zlib status=\(initStatus))")
+        }
+        defer { inflateEnd(&stream) }
 
-        let outputCapacity = 65536
-        var output = [UInt8](repeating: 0, count: outputCapacity)
+        let chunkSize = 65536
+        var out = [Bytef](repeating: 0, count: chunkSize)
         var result = Data()
-
-        while true {
-            if stream.dst_size == 0 {
-                stream.dst_ptr = output.withUnsafeMutableBufferPointer { $0.baseAddress }
-                stream.dst_size = outputCapacity
+        var status: Int32 = Z_OK
+        repeat {
+            stream.next_out = out.withUnsafeMutableBufferPointer { $0.baseAddress }
+            stream.avail_out = uInt(chunkSize)
+            status = inflate(&stream, Z_NO_FLUSH)
+            guard status == Z_OK || status == Z_STREAM_END else {
+                throw DebExtractError(message: "解压数据失败 (zlib status=\(status))")
             }
-            let beforeDst = stream.dst_size
-            let status = compression_stream_process(&stream, COMPRESSION_STREAM_FINALIZE)
-            let written = beforeDst - stream.dst_size
+            let written = chunkSize - Int(stream.avail_out)
             if written > 0 {
-                result.append(contentsOf: output.prefix(written))
+                result.append(contentsOf: out.prefix(written))
             }
-            if status == COMPRESSION_STATUS_END {
-                break
-            }
-            guard status == COMPRESSION_STATUS_OK else {
-                throw DebExtractError(message: "解压数据失败 (status=\(status.rawValue))")
-            }
-        }
+        } while status != Z_STREAM_END
         return result
     }
 
