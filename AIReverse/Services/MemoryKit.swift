@@ -384,21 +384,22 @@ final class MemoryTool {
 
     // MARK: - 枚举可读写区域
 
-    /// 使用静态 @convention(c) 回调桥接 Swift 闭包
-    private static var regionCallback: @convention(c) (mach_vm_address_t, mach_vm_size_t, UnsafeMutableRawPointer?) -> Void = { addr, size, userData in
-        if let ptr = userData {
-            let arr = ptr.bindMemory(to: [(UInt64, UInt64)].self, capacity: 1)
-            arr.pointee.append((UInt64(addr), UInt64(size)))
-        }
+    /// 通过静态变量桥接 Swift 数组给 C 回调（同步回调，线程安全）
+    private static var _regionBuffer: [(UInt64, UInt64)] = []
+
+    private static let regionCallback: @convention(c) (mach_vm_address_t, mach_vm_size_t, UnsafeMutableRawPointer?) -> Void = { addr, size, _ in
+        _regionBuffer.append((UInt64(addr), UInt64(size)))
     }
 
     func enumerateRegions() -> [(address: UInt64, size: UInt64)] {
-        guard let ctx = ctx else { return [] }
-        var regions: [(UInt64, UInt64)] = []
-        serialQueue.sync {
-            mt_enumerate_rw_regions(ctx, MemoryTool.regionCallback, &regions)
+        return serialQueue.sync {
+            guard let ctx = ctx else { return [] }
+            _regionBuffer = []
+            mt_enumerate_rw_regions(ctx, MemoryTool.regionCallback, nil)
+            let result = _regionBuffer
+            _regionBuffer = []
+            return result.map { (address: $0, size: $1) }
         }
-        return regions
     }
 
     // MARK: - AoB 解析
