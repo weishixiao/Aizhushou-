@@ -381,6 +381,7 @@ struct InjectPluginSheet: View {
                 dylibURL = URL(fileURLWithPath: first)
                 return
             }
+            RuntimeLogger.shared.warning("deb", "纯 Swift 解压完成但未找到 .dylib，尝试 dpkg-deb 回退")
         } catch {
             RuntimeLogger.shared.warning("deb", "纯 Swift 解压失败（\(error.localizedDescription)），尝试 dpkg-deb 回退")
         }
@@ -397,9 +398,10 @@ struct InjectPluginSheet: View {
             return
         }
 
-        RuntimeLogger.shared.error("deb", "deb 解压全部失败：\(dpkgOut.isEmpty ? "未知错误" : dpkgOut)")
+        let dpkgDetail = dpkgOut.contains("posix_spawn") ? "（dpkg-deb 命令不存在，请安装 dpkg 或提供 gzip 压缩的 deb）" : dpkgOut
+        RuntimeLogger.shared.error("deb", "deb 解压全部失败：\(dpkgDetail.isEmpty ? "未知错误" : dpkgDetail)")
         dylibURL = nil
-        errorMessage = "无法从 .deb 包中提取 dylib 文件。请确认包内包含 .dylib 插件，且本机已安装 dpkg-deb。"
+        errorMessage = "无法从 .deb 包中提取 dylib 文件。\(dpkgDetail.isEmpty ? "请确认包内包含 .dylib 插件。" : dpkgDetail)"
     }
 
     /// 递归在目录中查找第一个 .dylib 文件

@@ -21,12 +21,17 @@ enum DebExtractor {
         guard let dataTar = members.first(where: { $0.name.hasPrefix("data.tar") }) else {
             throw DebExtractError(message: "deb 包中未找到 data.tar 归档成员")
         }
+        RuntimeLogger.shared.info("deb", "找到 data.tar 成员：\(dataTar.name)（\(dataTar.data.count) 字节）")
         let raw = try decompressTar(data: dataTar.data, name: dataTar.name)
+        RuntimeLogger.shared.info("deb", "data.tar 解压完成：\(raw.count) 字节")
         let files = try extractTar(raw)
+        RuntimeLogger.shared.info("deb", "tar 解析出 \(files.count) 个文件")
         for file in files {
             try writeTarFile(file, into: dir)
         }
-        return findDylibs(in: dir)
+        let dylibs = findDylibs(in: dir)
+        RuntimeLogger.shared.info("deb", "找到 \(dylibs.count) 个 .dylib 文件")
+        return dylibs
     }
 
     // MARK: - ar 归档解析
@@ -70,7 +75,10 @@ enum DebExtractor {
 
     private static func decompressTar(data: Data, name: String) throws -> Data {
         if name.hasSuffix(".gz") || (data.count > 2 && data[0] == 0x1f && data[1] == 0x8b) {
-            return try inflateGzip(data)
+            return try inflateStream(data, algorithm: COMPRESSION_ZLIB)
+        }
+        if name.hasSuffix(".bz2") || (data.count > 3 && data[0] == 0x42 && data[1] == 0x5a && data[2] == 0x68) {
+            return try inflateStream(data, algorithm: COMPRESSION_BZIP2)
         }
         if name.hasSuffix(".xz") || name.hasSuffix(".zst") || name.hasSuffix(".lzma") {
             throw DebExtractError(message: "deb 使用 \(name) 压缩，本机需安装 dpkg-deb 解压")
@@ -78,34 +86,46 @@ enum DebExtractor {
         return data
     }
 
-    private static func inflateGzip(_ data: Data) throws -> Data {
-        guard let raw = try? inflateZlib(data), !raw.isEmpty else {
-            throw DebExtractError(message: "gzip 数据解压失败")
-        }
-        return raw
-    }
-
-    private static func inflateZlib(_ data: Data) throws -> Data {
+    /// 流式解压 gzip/zlib/bzip2 数据（COMPRESSION_ZLIB 自动识别 gzip 头），
+    /// 输出按需分块，避免一次性 buffer 不足导致截断。
+    private static func inflateStream(_ data: Data, algorithm: compression_algorithm) throws -> Data {
         guard !data.isEmpty else { return Data() }
-        var capacity = max(data.count * 4, 65536)
-        let maxCapacity = 512 * 1024 * 1024
-        while capacity < maxCapacity {
-            let dst = UnsafeMutablePointer<UInt8>.allocate(capacity: capacity)
-            defer { dst.deallocate() }
-            let written = data.withUnsafeBytes { (src: UnsafeRawBufferPointer) -> Int in
-                guard let base = src.baseAddress else { return 0 }
-                return compression_decode_buffer(
-                    dst, capacity,
-                    base.assumingMemoryBound(to: UInt8.self), data.count,
-                    nil, COMPRESSION_ZLIB
-                )
-            }
-            if written > 0 {
-                return Data(bytes: dst, count: written)
-            }
-            capacity *= 2
+
+        var stream = compression_stream()
+        let initStatus = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, algorithm)
+        guard initStatus == COMPRESSION_STATUS_OK else {
+            throw DebExtractError(message: "初始化解压器失败")
         }
-        throw DebExtractError(message: "数据解压超过 512MB 上限")
+        defer { compression_stream_destroy(&stream) }
+
+        let srcBuffer = [UInt8](data)
+        stream.src_ptr = srcBuffer.withUnsafeBufferPointer { $0.baseAddress }
+        stream.src_size = srcBuffer.count
+        stream.dst_size = 0
+
+        let outputCapacity = 65536
+        var output = [UInt8](repeating: 0, count: outputCapacity)
+        var result = Data()
+
+        while true {
+            if stream.dst_size == 0 {
+                stream.dst_ptr = output.withUnsafeMutableBufferPointer { $0.baseAddress }
+                stream.dst_size = outputCapacity
+            }
+            let beforeDst = stream.dst_size
+            let status = compression_stream_process(&stream, COMPRESSION_STREAM_FINALIZE)
+            let written = beforeDst - stream.dst_size
+            if written > 0 {
+                result.append(contentsOf: output.prefix(written))
+            }
+            if status == COMPRESSION_STATUS_END {
+                break
+            }
+            guard status == COMPRESSION_STATUS_OK else {
+                throw DebExtractError(message: "解压数据失败 (status=\(status.rawValue))")
+            }
+        }
+        return result
     }
 
     // MARK: - tar 解析（ustar + GNU LongLink）
@@ -132,8 +152,9 @@ enum DebExtractor {
             if size % 512 != 0 { offset += 512 - (size % 512) }
 
             switch typeFlag {
-            case 0x6c: // GNU 长文件名（LongLink）
-                pendingLongName = String(decoding: fileData, as: UTF8.self)
+            case 0x4c: // GNU 长文件名（LongLink，typeflag 'L'）
+                let nameBytes = fileData.prefix { $0 != 0 }
+                pendingLongName = String(decoding: nameBytes, as: UTF8.self)
             case 0x78, 0x67: // PAX / GNU 扩展头，忽略
                 break
             case 0x30, 0x00: // 普通文件
