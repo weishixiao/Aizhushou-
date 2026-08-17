@@ -127,7 +127,7 @@ public class DylibHideHelper {
             let addr = getImageAddressFn?(i)
             let addrValue: UInt64
             if let addr = addr {
-                addrValue = UInt64(bitPattern: UInt(addr))
+                addrValue = UInt64(UInt(bitPattern: addr))
             } else {
                 addrValue = 0
             }

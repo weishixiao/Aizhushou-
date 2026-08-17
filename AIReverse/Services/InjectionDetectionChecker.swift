@@ -188,7 +188,7 @@ public class InjectionDetectionChecker {
 
         let kr = withUnsafeMutablePointer(to: &dyldInfo) { ptr in
             ptr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                task_info(task, TASK_DYLD_INFO, $0, &count)
+                task_info(task, task_flavor_t(TASK_DYLD_INFO), $0, &count)
             }
         }
 
@@ -198,7 +198,14 @@ public class InjectionDetectionChecker {
         }
 
         let headerAddr = UInt64(dyldInfo.all_image_info_addr)
-        let count = dyldInfo.all_image_info_count
+
+        // dyld_all_image_infos 内存布局：version(UInt32) + infoArrayCount(UInt32) + infoArray(指针)
+        // task_dyld_info 结构体没有 count 字段，从内存中的 infoArrayCount 读取
+        guard let infosPtr = UnsafeRawPointer(bitPattern: headerAddr) else {
+            return DetectionResult(method: .machTaskInfo, found: false,
+                                   details: "无法读取 dyld_all_image_infos", suspectedLibs: [])
+        }
+        let imageCount = Int(infosPtr.advanced(by: 4).loadUnaligned(as: UInt32.self))
 
         // 检查 all_image_info 结构
         var suspectedLibs: [String] = []
@@ -206,7 +213,7 @@ public class InjectionDetectionChecker {
 
         // all_image_info 是一个 dyld_image_info 数组
         // 每个 dyld_image_info 包含 image_addr (vmaddress) 和 image_vmaddr_slide
-        for i in 0..<count {
+        for i in 0..<imageCount {
             let offset = i * 16  // dyld_image_info 大小
             let infoAddr = headerAddr + UInt64(offset)
 
@@ -286,7 +293,7 @@ public class InjectionDetectionChecker {
                 allLibs.append(libName)
 
                 if let addr = addrFn(i) {
-                    let addrValue = UInt64(bitPattern: UInt(addr))
+                    let addrValue = UInt64(UInt(bitPattern: addr))
                     // 检查地址是否在共享缓存范围
                     if addrValue < sharedCacheBase || addrValue >= sharedCacheEnd {
                         // 地址不在共享缓存范围内，可能是注入的 dylib
@@ -515,19 +522,49 @@ public extension InjectionDetectionChecker {
             if let name = nameFn(i) {
                 let path = String(cString: name)
                 if let addr = addrFn(i) {
-                    let addrValue = UInt64(bitPattern: UInt(addr))
-                    // 通过 dlinfo 获取大小
-                    var info: dl_info = dl_info()
-                    if let dladdrFn = getDladdrFunction(),
-                       dladdrFn(UnsafeRawPointer(bitPattern: addrValue)!, &info) != 0 {
-                        let size = UInt64(info.dli_ssize)
-                        libs.append((path, addrValue, size))
-                    } else {
-                        libs.append((path, addrValue, 0))
-                    }
+                    let addrValue = UInt64(UInt(bitPattern: addr))
+                    // iOS SDK 的 dl_info 没有 dli_ssize，改用 __TEXT 段 vmsize 估算镜像大小
+                    let size = imageSize(at: i, dyldHandle: dyldHandle)
+                    libs.append((path, addrValue, size))
                 }
             }
         }
         return libs
+    }
+
+    /// 通过 Mach-O 头部 __TEXT 段 vmsize 估算镜像大小
+    private func imageSize(at index: UInt32, dyldHandle: UnsafeMutableRawPointer) -> UInt64 {
+        guard let sym = dlsym(dyldHandle, "_dyld_get_image_header") else { return 0 }
+        let headerFn: @convention(c) (UInt32) -> UnsafePointer<mach_header>? = unsafeBitCast(
+            sym,
+            to: (@convention(c) (UInt32) -> UnsafePointer<mach_header>?).self
+        )
+        guard let header = headerFn(index) else { return 0 }
+
+        let base = UnsafeRawPointer(header)
+        let is64 = header.pointee.magic == MH_MAGIC_64
+        let ncmds = Int(header.pointee.ncmds)
+        var offset = is64 ? MemoryLayout<mach_header_64>.size : MemoryLayout<mach_header>.size
+
+        for _ in 0..<ncmds {
+            let cmd = base.loadUnaligned(fromByteOffset: offset, as: load_command.self)
+            if is64, cmd.cmd == LC_SEGMENT_64 {
+                let seg = base.loadUnaligned(fromByteOffset: offset, as: segment_command_64.self)
+                if segnameString(seg.segname) == "__TEXT" {
+                    return seg.vmsize
+                }
+            }
+            guard cmd.cmdsize >= MemoryLayout<load_command>.size else { break }
+            offset += Int(cmd.cmdsize)
+        }
+        return 0
+    }
+
+    /// 将 load command 的 16 字节 segname 元组转为字符串
+    private func segnameString(_ segname: (Int8, Int8, Int8, Int8, Int8, Int8, Int8, Int8,
+                                           Int8, Int8, Int8, Int8, Int8, Int8, Int8, Int8)) -> String {
+        withUnsafeBytes(of: segname) { raw in
+            String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+        }
     }
 }
