@@ -62,6 +62,10 @@ let sharedCacheBase: UInt64 = 0x180000000
 let sharedCacheSize: UInt64 = 0x080000000  // 2GB
 let sharedCacheEnd: UInt64 = sharedCacheBase + sharedCacheSize  // 0x200000000
 
+// 回调使用文件级全局状态，避免闭包捕获上下文（C 函数指针要求无捕获）
+private var injectionCallbackNameFn: (@convention(c) (UInt32) -> UnsafePointer<CChar>?)?
+private var injectionCallbackHandler: ((String, UnsafeRawPointer?) -> Void)?
+
 // MARK: - 注入检测器
 
 public class InjectionDetectionChecker {
@@ -473,12 +477,14 @@ public class InjectionDetectionChecker {
         let nameFn: @convention(c) (UInt32) -> UnsafePointer<CChar>? =
             unsafeBitCast(nameSym, to: (@convention(c) (UInt32) -> UnsafePointer<CChar>?).self)
 
-        regFn { [weak self] imageIndex, header in
-            guard let self = self else { return }
+        injectionCallbackNameFn = nameFn
+        injectionCallbackHandler = onDylibLoaded
+
+        regFn { imageIndex, header in
+            guard let nameFn = injectionCallbackNameFn else { return }
             let name = nameFn(UInt32(imageIndex))
             if let name = name {
-                let libName = String(cString: name)
-                self.onDylibLoaded?(libName, header)
+                injectionCallbackHandler?(String(cString: name), header)
             }
         }
 
@@ -490,6 +496,8 @@ public class InjectionDetectionChecker {
     public func unregisterDylibCallback() {
         registered = false
         onDylibLoaded = nil
+        injectionCallbackNameFn = nil
+        injectionCallbackHandler = nil
     }
 }
 

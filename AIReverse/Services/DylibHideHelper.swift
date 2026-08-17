@@ -31,6 +31,10 @@ typealias DyldGetImageAddressFn = @convention(c) (UInt32) -> UnsafeRawPointer?
 typealias DyldRegisterFuncFn = @convention(c) (@convention(c) (Int32, UnsafeRawPointer?) -> Void) -> Void
 typealias DladdrFn = @convention(c) (UnsafeRawPointer, UnsafeMutablePointer<dl_info>) -> Int32
 
+// 回调使用文件级全局状态，避免闭包捕获上下文（C 函数指针要求无捕获）
+private var dylibHideCallbackNameFn: DyldGetImageNameFn?
+private var dylibHideCallbackHandler: ((String) -> Void)?
+
 // MARK: - dyld 共享缓存地址范围
 
 /// 共享缓存地址范围（根据文档）
@@ -162,12 +166,15 @@ public class DylibHideHelper {
     public static func registerDylibCallback() -> Bool {
         guard ensureDyldLoaded(), !registeredCallback else { return true }
         guard let regFn = registerFuncFn, let nameFn = getImageNameFn else { return false }
-        
-        regFn { imageIndex, header in
+
+        dylibHideCallbackNameFn = nameFn
+        dylibHideCallbackHandler = onDylibLoaded
+
+        regFn { imageIndex, _ in
+            guard let nameFn = dylibHideCallbackNameFn else { return }
             let name = nameFn(UInt32(imageIndex))
             if let name = name {
-                let libName = String(cString: name)
-                onDylibLoaded?(libName)
+                dylibHideCallbackHandler?(String(cString: name))
             }
         }
         registeredCallback = true
