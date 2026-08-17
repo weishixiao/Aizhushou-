@@ -343,10 +343,18 @@ struct InjectPluginSheet: View {
             rt.setJailbreakOverride(enabled ? true : nil)
         }
         .sheet(isPresented: $showFilePicker) {
-            DocumentPicker(allowedContentTypes: [.item]) { url in
+            DocumentPicker(allowedContentTypes: injectableContentTypes) { url in
                 importDylib(url)
             }
         }
+    }
+
+    /// 插件注入允许的文件类型：deb 插件包 / dylib 动态库
+    private var injectableContentTypes: [UTType] {
+        [
+            UTType(filenameExtension: "deb") ?? .data,
+            UTType(filenameExtension: "dylib") ?? .data
+        ]
     }
 
     private func importDylib(_ url: URL) {
