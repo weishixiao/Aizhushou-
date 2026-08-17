@@ -62,10 +62,10 @@ struct MemoryChange: Identifiable {
 }
 
 /// 内存工具箱主类
-final class MemoryTool {
+final class MemoryTool: ObservableObject {
     static let shared = MemoryTool()
     private let serialQueue = DispatchQueue(label: "com.aireverse.memory")
-    private var ctxPtr: OpaquePointer?
+    private var ctxPtr: UnsafeMutablePointer<mt_ctx_t>?
 
     @Published var scanResults: [ScanResult] = []
     @Published var scanCount: Int = 0
@@ -86,24 +86,22 @@ final class MemoryTool {
         serialQueue.sync {
             let p = UnsafeMutablePointer<mt_ctx_t>.allocate(capacity: 1)
             p.initialize(to: mt_ctx_t())
-            mt_init(p, mach_task_self())
-            ctxPtr = OpaquePointer(p)
+            mt_init(p, mt_current_task())
+            ctxPtr = p
         }
     }
 
     func cleanup() {
         serialQueue.sync {
             if let p = ctxPtr {
-                let ptr = OpaquePointer(p).assumingMemoryBound(to: mt_ctx_t.self)
-                ptr.deallocate()
+                p.deallocate()
                 ctxPtr = nil
             }
         }
     }
 
     private var ctx: UnsafeMutablePointer<mt_ctx_t>? {
-        guard let p = ctxPtr else { return nil }
-        return OpaquePointer(p).assumingMemoryBound(to: mt_ctx_t.self)
+        ctxPtr
     }
 
     // MARK: - 同步扫描
@@ -241,8 +239,8 @@ final class MemoryTool {
             var rs = mt_result_set_t()
             let addrCount = scanResults.count
             rs.addrs = UnsafeMutablePointer<mach_vm_address_t>.allocate(capacity: addrCount)
-            rs.count = UInt64(addrCount)
-            rs.capacity = UInt64(addrCount)
+            rs.count = addrCount
+            rs.capacity = addrCount
             guard let addrsPtr = rs.addrs else { throw MemoryError.contextNotInitialized }
             for (i, r) in scanResults.enumerated() {
                 addrsPtr[Int(i)] = mach_vm_address_t(r.address)
@@ -430,10 +428,10 @@ final class MemoryTool {
     func enumerateRegions() -> [(address: UInt64, size: UInt64)] {
         return serialQueue.sync {
             guard let ctx = ctx else { return [] }
-            _regionBuffer = []
+            MemoryTool._regionBuffer = []
             mt_enumerate_rw_regions(ctx, MemoryTool.regionCallback, nil)
-            let result = _regionBuffer
-            _regionBuffer = []
+            let result = MemoryTool._regionBuffer
+            MemoryTool._regionBuffer = []
             return result.map { (address: $0, size: $1) }
         }
     }
@@ -442,7 +440,7 @@ final class MemoryTool {
 
     /// 解析 AoB 字符串，如 "FF 00 3A ??"
     /// ?? 表示通配符（忽略该字节），其他必须为两位十六进制
-    private func parseAoB(_ input: String) -> (pattern: [UInt8], mask: [UInt8], patLen: UInt) {
+    private func parseAoB(_ input: String) -> (pattern: [UInt8], mask: [UInt8], patLen: Int) {
         let cleaned = input.trimmingCharacters(in: .whitespaces)
         let tokens = cleaned.split { $0.isWhitespace }.map { String($0) }
 
@@ -453,7 +451,7 @@ final class MemoryTool {
             let chars = Array(token)
             let byteCount = chars.count / 2
             for i in 0..<byteCount {
-                let hexChars = String(chars[i*2...<(i*2+2)])
+                let hexChars = String(chars[(i*2)..<(i*2+2)])
                 if hexChars == "??" {
                     pattern.append(0)
                     mask.append(0)  // 0 = 通配（忽略）
@@ -463,7 +461,7 @@ final class MemoryTool {
                 }
             }
         }
-        return (pattern, mask, UInt(pattern.count))
+        return (pattern, mask, pattern.count)
     }
 }
 

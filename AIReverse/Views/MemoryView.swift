@@ -116,8 +116,7 @@ struct MemoryView: View {
             if mem.scanCount > 0 {
                 HStack {
                     Text("找到 \(mem.scanCount) 个地址")
-                        .font(.caption2)
-                        .fontWeight(.semibold)
+                        .font(.caption2.weight(.semibold))
                         .foregroundColor(accent)
 
                     Spacer()
@@ -262,8 +261,7 @@ struct MemoryView: View {
                         Button("写入") {
                             performWrite(address: addr)
                         }
-                        .font(.caption)
-                        .fontWeight(.semibold)
+                        .font(.caption.weight(.semibold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -364,12 +362,21 @@ struct MemoryView: View {
         dismissKeyboard()
 
         mem.asyncScan(selectedType, value: value) { result in
+            let message: String
+            let isError: Bool
+            switch result {
+            case .success(let addrs):
+                message = "扫描完成：\(self.selectedType.displayName) 搜索值='\(value)'，找到 \(addrs.count) 个地址"
+                isError = false
+            case .failure(let error):
+                message = "扫描失败：\(error.localizedDescription)"
+                isError = true
+            }
             DispatchQueue.main.async {
-                switch result {
-                case .success(let addrs):
-                    actionLog = "扫描完成：\(selectedType.displayName) 搜索值='\(value)'，找到 \(addrs.count) 个地址"
-                case .failure(let error):
-                    errorMessage = "扫描失败：\(error.localizedDescription)"
+                if isError {
+                    self.errorMessage = message
+                } else {
+                    self.actionLog = message
                 }
             }
         }
