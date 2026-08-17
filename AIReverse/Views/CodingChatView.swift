@@ -23,6 +23,7 @@ struct CodingChatView: View {
     @State private var showProcessSheet = false         // 「进程」：发往 AI 破解
     @State private var targetApp: InstalledApp?          // 「进程」选中的目标应用（停留在聊天界面）
     @State private var showPhotoPicker = false          // 「相册」：调取本机相册
+    @State private var showMemorySheet = false          // 「内存」：内存扫描/读写/patch
     @State private var hasPhotoAttachment = false
 
     private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
@@ -124,6 +125,12 @@ struct CodingChatView: View {
                         selectTargetApp(app)
                     }
                 }
+            }
+        }
+        // 「内存」：内存扫描/读写/代码 Patch
+        .sheet(isPresented: $showMemorySheet) {
+            NavigationView {
+                MemoryView()
             }
         }
         .onAppear {
@@ -448,6 +455,11 @@ struct CodingChatView: View {
                 title: "进程",
                 icon: "cpu",
                 action: { showProcessSheet = true }
+            )
+            quickActionButton(
+                title: "内存",
+                icon: "memory",
+                action: { showMemorySheet = true }
             )
         }
         .padding(.vertical, 7)
