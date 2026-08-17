@@ -148,6 +148,13 @@ final class InjectionManager: ObservableObject {
             throw InjectionError.noRootAccess("需要 root 权限写入 App bundle，但无法提权")
         }
 
+        // 环境工具探测（诊断用）
+        let probeNames = ["ldid", "insert_dylib", "jtool", "uicache", "dpkg-deb", "plutil"]
+        let probeResult = probeNames
+            .map { "\($0)=\(findTool($0) != nil ? "有" : "无")" }
+            .joined(separator: "，")
+        RuntimeLogger.shared.info("注入", "环境工具探测：\(probeResult)")
+
         do {
             let (log, method) = try doInject(
                 dylibPath: dylibPath,
@@ -202,6 +209,37 @@ final class InjectionManager: ObservableObject {
         return (appBundle as NSString).appendingPathComponent(bundleName)
     }
 
+    /// 在 PATH 中查找工具是否存在（App 进程内探测，用于诊断日志）
+    private func findTool(_ name: String) -> String? {
+        for dir in jbPath.split(separator: ":") {
+            let candidate = (String(dir) as NSString).appendingPathComponent(name)
+            var exists = false
+            candidate.withCString { ptr in exists = access(ptr, X_OK) == 0 }
+            if exists { return candidate }
+        }
+        return nil
+    }
+
+    /// 写回补丁后的二进制：优先直接写，失败则经 root 复制覆盖
+    private func writeBinary(_ data: Data, to path: String) throws {
+        do {
+            try data.write(to: URL(fileURLWithPath: path))
+        } catch {
+            let tmp = (NSTemporaryDirectory() as NSString).appendingPathComponent("patched_bin_\(UUID().uuidString)")
+            do {
+                try data.write(to: URL(fileURLWithPath: tmp))
+            } catch {
+                throw InjectionError.failed("写临时补丁文件失败:\n\(error.localizedDescription)")
+            }
+            let (code, out) = runAsRoot("cp -f '\(tmp)' '\(path)'", environment: ["PATH": jbPath])
+            runAsRoot("rm -f '\(tmp)'", environment: ["PATH": jbPath])
+            if code != 0 {
+                throw InjectionError.failed("写回补丁后二进制失败:\n\(out)")
+            }
+        }
+        runAsRoot("chmod 755 '\(path)'", environment: ["PATH": jbPath])
+    }
+
     private func doInject(
         dylibPath: String,
         appBundle: String,
@@ -243,46 +281,84 @@ final class InjectionManager: ObservableObject {
 
         // ── 3. 注入方式：Mach-O 修改 ──
         let dylibInstallPath = "@executable_path/\(dylibName)"
+        var injected = false
 
-        // 3a. 尝试 insert_dylib（最可靠）
-        log.append("▸ 尝试 insert_dylib...")
-        let (insertCode, insertOut) = runAsRoot(
-            "insert_dylib \(dylibInstallPath) '\(mainBinary)' '\(mainBinary).injected' && mv '\(mainBinary).injected' '\(mainBinary)'",
-            environment: ["PATH": jbPath]
-        )
-        if insertCode == 0 {
-            method = "LC_LOAD_DYLIB (insert_dylib)"
-            log.append("✓ insert_dylib 成功")
-        } else {
-            let insertErr = insertOut.trimmingCharacters(in: .whitespacesAndNewlines)
-            log.append("✗ insert_dylib 失败: \(insertErr.isEmpty ? "命令不存在或执行失败" : insertErr)")
+        // 3a. 纯 Swift 注入（自包含，不依赖外部 insert_dylib / jtool）
+        log.append("▸ 纯 Swift 注入 LC_LOAD_DYLIB...")
+        do {
+            var original: Data
+            do {
+                original = try Data(contentsOf: URL(fileURLWithPath: mainBinary))
+            } catch {
+                // App 进程无权限直接读 → root 复制副本再读
+                let tmp = (NSTemporaryDirectory() as NSString).appendingPathComponent("orig_bin_\(UUID().uuidString)")
+                let (rc, rout) = runAsRoot("cp -f '\(mainBinary)' '\(tmp)'", environment: ["PATH": jbPath])
+                guard rc == 0 else {
+                    throw InjectionError.failed("读取目标二进制失败:\n\(rout)")
+                }
+                original = try Data(contentsOf: URL(fileURLWithPath: tmp))
+                runAsRoot("rm -f '\(tmp)'", environment: ["PATH": jbPath])
+            }
 
-            // 3b. 尝试 jtool
-            log.append("▸ 尝试 jtool...")
-            let (jtoolCode, jtoolOut) = runAsRoot(
-                "jtool --inplace --LC_LOAD_DYLIB=\(dylibInstallPath) '\(mainBinary)'",
+            if try MachOEditor.containsDylib(dylibInstallPath, in: original) {
+                method = "LC_LOAD_DYLIB (纯 Swift)"
+                log.append("✓ 已检测到目标 dylib，无需重复注入")
+                injected = true
+            } else {
+                let patched = try MachOEditor.patchData(original, dylibPath: dylibInstallPath)
+                try writeBinary(patched, to: mainBinary)
+                method = "LC_LOAD_DYLIB (纯 Swift)"
+                log.append("✓ 纯 Swift 注入成功")
+                injected = true
+            }
+        } catch {
+            log.append("✗ 纯 Swift 注入失败: \(error.localizedDescription)")
+        }
+
+        if !injected {
+            // 3b. 尝试 insert_dylib（外部工具回退）
+            log.append("▸ 尝试 insert_dylib...")
+            let (insertCode, insertOut) = runAsRoot(
+                "insert_dylib \(dylibInstallPath) '\(mainBinary)' '\(mainBinary).injected' && mv '\(mainBinary).injected' '\(mainBinary)'",
                 environment: ["PATH": jbPath]
             )
-            if jtoolCode == 0 {
-                method = "LC_LOAD_DYLIB (jtool)"
-                log.append("✓ jtool 成功")
+            if insertCode == 0 {
+                method = "LC_LOAD_DYLIB (insert_dylib)"
+                log.append("✓ insert_dylib 成功")
+                injected = true
             } else {
-                let jtoolErr = jtoolOut.trimmingCharacters(in: .whitespacesAndNewlines)
-                log.append("✗ jtool 失败: \(jtoolErr.isEmpty ? "命令不存在或执行失败" : jtoolErr)")
+                let insertErr = insertOut.trimmingCharacters(in: .whitespacesAndNewlines)
+                log.append("✗ insert_dylib 失败: \(insertErr.isEmpty ? "命令不存在或执行失败" : insertErr)")
 
-                // 3c. 后备：DYLD_INSERT_LIBRARIES（修改 Info.plist）
-                log.append("▸ 使用 DYLD_INSERT_LIBRARIES（修改 Info.plist）...")
-                let setCmd = "/usr/libexec/PlistBuddy -c 'Set :DYLD_INSERT_LIBRARIES \(dylibInstallPath)' '\(infoPlist)'"
-                let (setCode, setOut) = runAsRoot(setCmd, environment: ["PATH": jbPath])
-                if setCode != 0 {
-                    let addCmd = "/usr/libexec/PlistBuddy -c 'Add :DYLD_INSERT_LIBRARIES string \(dylibInstallPath)' '\(infoPlist)'"
-                    let (addCode, addOut) = runAsRoot(addCmd, environment: ["PATH": jbPath])
-                    if addCode != 0 {
-                        let err = addOut.trimmingCharacters(in: .whitespacesAndNewlines)
-                        throw InjectionError.failed("修改 Info.plist 失败:\n\(err.isEmpty ? "未知错误" : err)")
+                // 3c. 尝试 jtool
+                log.append("▸ 尝试 jtool...")
+                let (jtoolCode, jtoolOut) = runAsRoot(
+                    "jtool --inplace --LC_LOAD_DYLIB=\(dylibInstallPath) '\(mainBinary)'",
+                    environment: ["PATH": jbPath]
+                )
+                if jtoolCode == 0 {
+                    method = "LC_LOAD_DYLIB (jtool)"
+                    log.append("✓ jtool 成功")
+                    injected = true
+                } else {
+                    let jtoolErr = jtoolOut.trimmingCharacters(in: .whitespacesAndNewlines)
+                    log.append("✗ jtool 失败: \(jtoolErr.isEmpty ? "命令不存在或执行失败" : jtoolErr)")
+
+                    // 3d. 后备：DYLD_INSERT_LIBRARIES（修改 Info.plist）
+                    log.append("▸ 使用 DYLD_INSERT_LIBRARIES（修改 Info.plist）...")
+                    let setCmd = "/usr/libexec/PlistBuddy -c 'Set :DYLD_INSERT_LIBRARIES \(dylibInstallPath)' '\(infoPlist)'"
+                    let (setCode, setOut) = runAsRoot(setCmd, environment: ["PATH": jbPath])
+                    if setCode != 0 {
+                        let addCmd = "/usr/libexec/PlistBuddy -c 'Add :DYLD_INSERT_LIBRARIES string \(dylibInstallPath)' '\(infoPlist)'"
+                        let (addCode, addOut) = runAsRoot(addCmd, environment: ["PATH": jbPath])
+                        if addCode != 0 {
+                            let err = addOut.trimmingCharacters(in: .whitespacesAndNewlines)
+                            throw InjectionError.failed("修改 Info.plist 失败:\n\(err.isEmpty ? "未知错误" : err)")
+                        }
                     }
+                    log.append("✓ Info.plist 已修改")
+                    method = "DYLD_INSERT_LIBRARIES"
                 }
-                log.append("✓ Info.plist 已修改")
             }
         }
 
