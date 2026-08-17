@@ -366,88 +366,40 @@ struct InjectPluginSheet: View {
         }
     }
 
-    /// 尝试从 .deb 包中提取 .dylib 文件
+    /// 尝试从 .deb 包中提取 .dylib 文件。
+    /// 优先纯 Swift 解压（不依赖外部命令），失败时回退 dpkg-deb。
     private func extractDylibFromDeb(_ debURL: URL) {
-        let debPath = debURL.path
-        let extractDir = debURL.deletingLastPathComponent().appendingPathComponent("extracted_\(debURL.lastPathComponent)")
-        try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
-        let extractPath = extractDir.path
-
-        // 用 Python 脚本解压 deb（不依赖 ar 命令，兼容 iOS 越狱环境）
-        let pythonScript = """
-import sys, os, tarfile, struct
-
-def extract_deb(deb_path, out_dir):
-    '''手动解压 .deb（ar 归档格式）'''
-    with open(deb_path, 'rb') as f:
-        # 验证 ar 签名
-        magic = f.read(8)
-        if magic != b'!<arch>\\n':
-            sys.exit(2)
-        
-        # 遍历 ar 文件成员
-        while True:
-            header = f.read(60)
-            if len(header) < 60:
-                break
-            name = header[:16].decode('ascii', errors='replace').strip()
-            size_str = header[48:58].decode('ascii', errors='replace').strip()
-            try:
-                size = int(size_str)
-            except:
-                break
-            
-            data = f.read(size)
-            if len(data) < size:
-                break
-            # 对齐
-            if size % 2 != 0:
-                f.read(1)
-            
-            if name.startswith('data.tar'):
-                # 解压 data.tar
-                tar_path = os.path.join(out_dir, name)
-                with open(tar_path, 'wb') as tf:
-                    tf.write(data)
-                # 解压 tar
-                with tarfile.open(tar_path) as tar:
-                    tar.extractall(path=out_dir)
-                os.remove(tar_path)
-                sys.exit(0)
-        
-        sys.exit(3)
-
-if __name__ == '__main__':
-    extract_deb(sys.argv[1], sys.argv[2])
-"""
-        let scriptPath = (NSTemporaryDirectory() as NSString).appendingPathComponent("extract_deb.py")
-        try? pythonScript.write(toFile: scriptPath, atomically: true, encoding: .utf8)
-
         let rt = JailbreakRuntime.shared
-        let (pyCode, _) = rt.executeCommand("python3 \(scriptPath) \(debPath) \(extractPath)", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin"])
-        try? FileManager.default.removeItem(atPath: scriptPath)
+        let jbPath = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin"
+        let extractDir = debURL.deletingLastPathComponent().appendingPathComponent("extracted_\(debURL.lastPathComponent)")
 
-        if pyCode == 0 {
-            // 递归查找 dylib
-            if let found = findFirstDylib(in: extractPath) {
-                dylibURL = URL(fileURLWithPath: found)
+        // 1. 纯 Swift 解压（Relaxin / 精简越狱环境最可靠）
+        do {
+            let dylibs = try DebExtractor.extractDylibs(from: debURL, into: extractDir)
+            if let first = dylibs.first {
+                RuntimeLogger.shared.info("deb", "纯 Swift 解压成功，提取 dylib：\(first)")
+                dylibURL = URL(fileURLWithPath: first)
                 return
             }
+        } catch {
+            RuntimeLogger.shared.warning("deb", "纯 Swift 解压失败（\(error.localizedDescription)），尝试 dpkg-deb 回退")
         }
 
-        // 如果 Python 解压失败，尝试用 dpkg-deb（越狱环境）
-        if pyCode != 0 {
-            let (dpkgCode, _) = rt.executeCommand("dpkg-deb -x \(debPath) \(extractPath)", environment: ["PATH": "/usr/bin:/bin:/usr/sbin:/sbin"])
-            if dpkgCode == 0 {
-                if let found = findFirstDylib(in: extractPath) {
-                    dylibURL = URL(fileURLWithPath: found)
-                    return
-                }
-            }
+        // 2. dpkg-deb 回退（PATH 覆盖 /var/jb/usr/bin）
+        try? FileManager.default.createDirectory(at: extractDir, withIntermediateDirectories: true)
+        let (dpkgCode, dpkgOut) = rt.executeCommand(
+            "dpkg-deb -x '\(debURL.path)' '\(extractDir.path)' 2>&1",
+            environment: ["PATH": jbPath]
+        )
+        if dpkgCode == 0, let found = findFirstDylib(in: extractDir.path) {
+            RuntimeLogger.shared.info("deb", "dpkg-deb 解压成功，提取 dylib：\(found)")
+            dylibURL = URL(fileURLWithPath: found)
+            return
         }
 
-        // 全部失败
+        RuntimeLogger.shared.error("deb", "deb 解压全部失败：\(dpkgOut.isEmpty ? "未知错误" : dpkgOut)")
         dylibURL = nil
+        errorMessage = "无法从 .deb 包中提取 dylib 文件。请确认包内包含 .dylib 插件，且本机已安装 dpkg-deb。"
     }
 
     /// 递归在目录中查找第一个 .dylib 文件

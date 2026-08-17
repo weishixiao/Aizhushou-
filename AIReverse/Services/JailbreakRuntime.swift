@@ -11,12 +11,19 @@ final class JailbreakRuntime {
     static let shared = JailbreakRuntime()
     private init() {}
 
-    /// 检测 rootless 环境下的 root shell 路径（/var/jb/opt/procursus/bin/sh 优先）
+    /// 检测 rootless 环境下的 root shell 路径（Procursus / RootHide 优先）
     var rootShell: String {
-        let jbProcursusShell = "/var/jb/opt/procursus/bin/sh"
-        var exists = false
-        jbProcursusShell.withCString { ptr in exists = access(ptr, F_OK) == 0 }
-        if exists { return jbProcursusShell }
+        let candidates = [
+            "/var/jb/opt/procursus/bin/sh",
+            "/var/jb/usr/bin/sh",
+            "/var/jb/bin/sh",
+            "/bin/sh",
+        ]
+        for path in candidates {
+            var exists = false
+            path.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+            if exists { return path }
+        }
         return "/bin/sh"
     }
 
@@ -30,6 +37,7 @@ final class JailbreakRuntime {
         } else {
             UserDefaults.standard.removeObject(forKey: Self.overrideKey)
         }
+        cachedJailbroken = nil
     }
 
     // MARK: - 环境探测
@@ -50,8 +58,19 @@ final class JailbreakRuntime {
         geteuid() != 0
     }
 
-    /// 是否为越狱环境
+    /// 是否为越狱环境（带缓存，避免频繁做 15+ 次文件系统探测）
     var isJailbroken: Bool {
+        if let cached = cachedJailbroken {
+            return cached
+        }
+        let result = detectJailbroken()
+        cachedJailbroken = result
+        return result
+    }
+
+    private var cachedJailbroken: Bool?
+
+    private func detectJailbroken() -> Bool {
         // 0) 若用户手动强制指定，以手动值为准（自动检测在沙盒内可能受限）
         if UserDefaults.standard.object(forKey: Self.overrideKey) != nil {
             return UserDefaults.standard.bool(forKey: Self.overrideKey)
@@ -213,9 +232,13 @@ final class JailbreakRuntime {
         }
         var envDict = ProcessInfo.processInfo.environment
         for (k, v) in environment { envDict[k] = v }
-        envDict["PATH"] = envDict["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        if let path = envDict["PATH"], !path.isEmpty {
-            shellCommand += "export PATH=\(shQuote(path)); "
+        var pathValue = envDict["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        if !pathValue.contains("/var/jb") {
+            pathValue += ":/var/jb/usr/bin:/var/jb/bin:/var/jb/usr/sbin:/var/jb/opt/procursus/bin"
+        }
+        envDict["PATH"] = pathValue
+        if !pathValue.isEmpty {
+            shellCommand += "export PATH=\(shQuote(pathValue)); "
         }
         shellCommand += fullCommand
         shellCommand += " > \(shQuote(outFile)) 2>&1"

@@ -1,9 +1,14 @@
 import SwiftUI
+import UIKit
 
 @main
 struct AIReverseApp: App {
     @StateObject private var modelStore = ModelStore()
     @StateObject private var workspace = WorkspaceManager()
+
+    init() {
+        logLaunchInfo()
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -11,5 +16,16 @@ struct AIReverseApp: App {
                 .environmentObject(modelStore)
                 .environmentObject(workspace)
         }
+    }
+
+    private func logLaunchInfo() {
+        let device = UIDevice.current
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
+        let isJailbroken = JailbreakRuntime.shared.isJailbroken
+        RuntimeLogger.shared.info(
+            "App",
+            "启动 AIReverse v\(appVersion)(\(build))，设备 \(device.model)，系统 \(device.systemName) \(device.systemVersion)，越狱环境：\(isJailbroken ? "是" : "否")"
+        )
     }
 }

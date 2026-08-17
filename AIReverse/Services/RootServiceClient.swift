@@ -42,7 +42,9 @@ final class RootServiceClient {
         }
         guard ret == 0 else {
             close(sock)
-            throw RootServiceError.connectFailed(errno)
+            let error = RootServiceError.connectFailed(errno)
+            RuntimeLogger.shared.warning("RootService", error.localizedDescription)
+            throw error
         }
         fd = sock
     }

@@ -48,10 +48,16 @@ final class InstalledApps {
 
     /// 列出全部已安装应用
     func allApps() -> [InstalledApp] {
-        if let apps = listViaLSApplicationWorkspace() {
+        if let apps = listViaLSApplicationWorkspace(), !apps.isEmpty {
+            RuntimeLogger.shared.info("Apps", "LSApplicationWorkspace 枚举成功：\(apps.count) 个应用")
             return apps
         }
-        return listViaContainersDirectory()
+        let apps = listViaContainersDirectory()
+        RuntimeLogger.shared.info("Apps", "容器目录枚举：\(apps.count) 个应用")
+        if apps.isEmpty {
+            RuntimeLogger.shared.warning("Apps", "未能枚举到已安装应用（LSApplicationWorkspace 与容器目录均无结果）")
+        }
+        return apps
     }
 
     /// 仅用户应用（排除系统应用）

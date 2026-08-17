@@ -36,6 +36,17 @@ struct SettingsHubView: View {
                         subtitle: "LaunchDaemon 守护进程、root 提权管理"
                     )
                 }
+
+                NavigationLink {
+                    RuntimeLogsView()
+                } label: {
+                    featureRow(
+                        icon: "doc.text.magnifyingglass",
+                        color: .green,
+                        title: "运行日志",
+                        subtitle: "查看、复制与清空应用运行日志"
+                    )
+                }
             }
         }
         .navigationTitle("设置")

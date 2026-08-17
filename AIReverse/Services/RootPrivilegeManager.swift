@@ -161,6 +161,7 @@ final class RootPrivilegeManager {
         var binExists = false
         binaryPath.withCString { ptr in binExists = access(ptr, F_OK) == 0 }
         if !binExists {
+            RuntimeLogger.shared.error("Daemon", "二进制路径不存在：\(binaryPath)")
             return DaemonSetupResult(
                 log: "❌ 二进制路径不存在: \(binaryPath)\n请确认 App 已正确安装",
                 commands: []
@@ -180,6 +181,7 @@ final class RootPrivilegeManager {
         if createCode != 0 {
             // mobile 用户无权限创建目录，提供手动命令
             let plistContent = daemonPlistContent(binaryPath: binaryPath)
+            RuntimeLogger.shared.warning("Daemon", "自动创建 LaunchDaemons 目录失败（权限不足），已给出手动命令")
             log.append("⚠️ 自动创建目录失败（mobile 权限不足）")
             log.append("")
             log.append("📋 请在 NewTerm 中逐条复制执行以下命令：")

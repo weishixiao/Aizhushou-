@@ -236,6 +236,7 @@ final class CodingAgent: ObservableObject {
                             }
                         } catch {
                             let msg = "执行失败：\(error.localizedDescription)"
+                            RuntimeLogger.shared.error("Tool[\(call.name)]", msg)
                             toolMessages.append(ChatMessage(role: .tool, content: msg, toolCallID: call.id, name: call.name))
                             await MainActor.run {
                                 updateStage("工具执行失败：\(call.name)", model: model, prompt: userText)
@@ -254,6 +255,7 @@ final class CodingAgent: ObservableObject {
             }
         } catch {
             if !isCancelled {
+                RuntimeLogger.shared.error("LLM", "请求失败：\(error.localizedDescription)")
                 await MainActor.run {
                     errorMessage = error.localizedDescription
                     updateStage("请求失败", model: model, prompt: userText)

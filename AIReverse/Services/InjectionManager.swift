@@ -107,6 +107,7 @@ final class InjectionManager: ObservableObject {
     @discardableResult
     func injectDylib(at dylibPath: String, into app: InstalledApp, targetDir: String = "") throws -> String {
         guard rt.isJailbroken else {
+            RuntimeLogger.shared.error("注入", "未检测到越狱环境，无法注入 \(dylibPath) 到 \(app.displayName)")
             throw InjectionError.notJailbroken
         }
 
@@ -117,6 +118,7 @@ final class InjectionManager: ObservableObject {
         var srcExists = false
         dylibPath.withCString { ptr in srcExists = access(ptr, F_OK) == 0 }
         if !srcExists {
+            RuntimeLogger.shared.error("注入", "dylib 不存在: \(dylibPath)")
             throw InjectionError.dylibNotFound(dylibPath)
         }
 
@@ -128,40 +130,49 @@ final class InjectionManager: ObservableObject {
         var binExists = false
         mainBinary.withCString { ptr in binExists = access(ptr, F_OK) == 0 }
         if !binExists {
+            RuntimeLogger.shared.error("注入", "目标主二进制不存在: \(mainBinary)")
             throw InjectionError.targetNotFound(mainBinary)
         }
 
         var bundleExists = false
         appBundle.withCString { ptr in bundleExists = access(ptr, F_OK) == 0 }
         if !bundleExists {
+            RuntimeLogger.shared.error("注入", "目标 App bundle 不存在: \(appBundle)")
             throw InjectionError.targetNotFound(appBundle)
         }
 
         // 确认 root 权限可用（直接 root / su / RootService 任一即可）
-        let (suCheckCode, _) = runAsRoot("id", environment: ["PATH": jbPath])
+        let (suCheckCode, suCheckOut) = runAsRoot("id", environment: ["PATH": jbPath])
         if suCheckCode != 0 {
+            RuntimeLogger.shared.error("注入", "root 权限检查失败: \(suCheckOut)")
             throw InjectionError.noRootAccess("需要 root 权限写入 App bundle，但无法提权")
         }
 
-        let (log, method) = try doInject(
-            dylibPath: dylibPath,
-            appBundle: appBundle,
-            mainBinary: mainBinary,
-            dylibName: dylibName
-        )
+        do {
+            let (log, method) = try doInject(
+                dylibPath: dylibPath,
+                appBundle: appBundle,
+                mainBinary: mainBinary,
+                dylibName: dylibName
+            )
 
-        let record = InjectionRecord(
-            appBundleID: app.bundleID,
-            appName: app.displayName,
-            dylibName: dylibName,
-            appBundlePath: appBundle,
-            method: method,
-            status: "注入成功",
-            message: "已通过 \(method) 注入 \(dylibName) 到 \(app.displayName)\n重启应用后生效。"
-        )
-        recentInjections.insert(record, at: 0)
+            let record = InjectionRecord(
+                appBundleID: app.bundleID,
+                appName: app.displayName,
+                dylibName: dylibName,
+                appBundlePath: appBundle,
+                method: method,
+                status: "注入成功",
+                message: "已通过 \(method) 注入 \(dylibName) 到 \(app.displayName)\n重启应用后生效。"
+            )
+            recentInjections.insert(record, at: 0)
+            RuntimeLogger.shared.info("注入", "注入成功：\(dylibName) → \(app.displayName)（\(method)）")
 
-        return log
+            return log
+        } catch {
+            RuntimeLogger.shared.error("注入", "注入失败：\(error.localizedDescription)")
+            throw error
+        }
     }
 
     private func doInject(
