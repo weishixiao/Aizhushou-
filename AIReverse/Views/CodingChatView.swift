@@ -660,21 +660,26 @@ struct CodingChatView: View {
 struct DocumentMessageRow: View {
     let message: ChatMessage
 
-    private let aiBubble = Color(red: 0.92, green: 0.92, blue: 0.95)  // 浅灰蓝 AI 气泡
     private let userBubble = Color(red: 0.85, green: 0.95, blue: 0.88) // 浅绿 用户气泡
-    private let toolBubble = Color(red: 0.90, green: 0.90, blue: 0.90) // 浅灰工具气泡
+    private let toolIconBlock = Color(red: 0.94, green: 0.95, blue: 0.93) // 浅绿工具图标块 #F0F1EC
+    private let toolIconGreen = Color(red: 0.03, green: 0.56, blue: 0.31) // 绿色工具图标 #08904E
+    private let cardBorder = Color(red: 0.90, green: 0.91, blue: 0.89) // 卡片浅边框
 
     var body: some View {
         VStack(spacing: 2) {
             if message.role == .assistant {
-                // AI 消息：左对齐，浅灰蓝气泡
+                // AI 消息：左对齐，白色卡片 + 浅灰边框
                 HStack {
                     MarkdownView(content: message.content)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(aiBubble)
-                        .cornerRadius(14)
                         .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .leading)
+                        .background(Color.white)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14)
+                                .stroke(cardBorder, lineWidth: 1)
+                        )
+                        .cornerRadius(14)
                     Spacer(minLength: 0)
                 }
             } else if message.role == .user {
@@ -691,18 +696,7 @@ struct DocumentMessageRow: View {
                         .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
                 }
             } else if message.role == .tool {
-                HStack {
-                    Image(systemName: "hammer.fill")
-                        .font(.caption2)
-                        .foregroundColor(.orange)
-                    Text(message.content)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-                .padding(10)
-                .background(toolBubble)
-                .cornerRadius(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                toolCallRow
             } else {
                 Text(message.content)
                     .font(.caption2)
@@ -722,6 +716,101 @@ struct DocumentMessageRow: View {
                 Label("复制时间", systemImage: "clock")
             }
         }
+    }
+
+    /// 工具调用气泡：MonkeyCode 工作台风格
+    /// 左侧浅绿圆角图标块 + 右侧工具名标题与等宽内容
+    private var toolCallRow: some View {
+        HStack(alignment: .top, spacing: 0) {
+            // 左侧浅绿图标块
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(toolIconBlock)
+                    .frame(width: 56, height: 56)
+                Image(systemName: toolIconName)
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundColor(toolIconGreen)
+            }
+            .padding(.trailing, 12)
+
+            // 右侧：标题 + 内容
+            VStack(alignment: .leading, spacing: 6) {
+                Text(toolTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(Color(red: 0.11, green: 0.11, blue: 0.11))
+                Text(message.content)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(Color(red: 0.40, green: 0.40, blue: 0.38))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(Color.white)
+        .cornerRadius(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 根据工具名映射图标
+    private var toolIconName: String {
+        guard let name = message.name?.lowercased() else { return "wrench.and.screwdriver.fill" }
+        if name.contains("exec") || name.contains("command") || name.contains("shell") || name.contains("bash") {
+            return "terminal.fill"
+        }
+        if name.contains("read") || name.contains("file") {
+            return "doc.text.fill"
+        }
+        if name.contains("search") || name.contains("find") || name.contains("grep") || name.contains("lookup") {
+            return "magnifyingglass"
+        }
+        if name.contains("write") || name.contains("edit") || name.contains("modify") {
+            return "pencil.and.outline"
+        }
+        if name.contains("git") || name.contains("repo") || name.contains("branch") || name.contains("commit") {
+            return "arrow.triangle.branch"
+        }
+        if name.contains("list_dir") || name.contains("ls") {
+            return "folder.fill"
+        }
+        if name.contains("app") || name.contains("install") {
+            return "apps.iphone"
+        }
+        if name.contains("list") {
+            return "list.bullet"
+        }
+        return "wrench.and.screwdriver.fill"
+    }
+
+    /// 工具显示标题（去除下划线，转为中文友好名）
+    private var toolTitle: String {
+        guard let name = message.name, !name.isEmpty else { return "工具调用" }
+        let mapping: [String: String] = [
+            "execute_command": "执行命令",
+            "read_file": "读取文件",
+            "list_dir": "列出目录",
+            "write_file": "写入文件",
+            "edit_file": "编辑文件",
+            "search_files": "查找内容",
+            "grep": "查找内容",
+            "find": "查找内容",
+            "git_status": "仓库状态",
+            "git_branch": "分支信息",
+            "git_log": "提交记录",
+            "git_commit": "提交代码",
+            "repo_overview": "仓库概览",
+            "list_installed_apps": "应用列表",
+            "modify_app_data": "修改应用数据",
+            "setup_root_privilege": "权限设置",
+            "root_service": "Root 服务",
+            "package_scan": "扫描应用",
+            "mcp_call": "MCP 调用",
+            "llm_call": "模型调用",
+            "github_pull": "拉取仓库",
+            "github_push": "推送仓库",
+        ]
+        if let mapped = mapping[name] { return mapped }
+        return name.replacingOccurrences(of: "_", with: " ").capitalized
     }
 
     private var quotedContent: String {
