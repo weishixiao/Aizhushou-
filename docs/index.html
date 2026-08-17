@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI逆向助手 · AIReverse</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --bg-soft: #111822;
+    --panel: #151d29;
+    --border: #243041;
+    --text: #e6edf5;
+    --muted: #93a3b8;
+    --accent: #3dd6c5;
+    --accent-2: #5b8cff;
+    --code-bg: #0d1320;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 24px 80px; }
+  header {
+    padding: 72px 0 48px;
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(900px 300px at 15% -10%, rgba(61, 214, 197, 0.12), transparent 60%),
+      radial-gradient(800px 300px at 90% -20%, rgba(91, 140, 255, 0.10), transparent 60%);
+  }
+  .badge {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+    border: 1px solid rgba(61, 214, 197, 0.4);
+    background: rgba(61, 214, 197, 0.08);
+    padding: 4px 12px;
+    border-radius: 999px;
+    margin-bottom: 20px;
+  }
+  h1 { font-size: 40px; font-weight: 800; letter-spacing: -0.02em; }
+  h1 span { color: var(--accent); }
+  .subtitle { margin-top: 12px; font-size: 18px; color: var(--muted); max-width: 640px; }
+  h2 { font-size: 22px; margin: 56px 0 18px; font-weight: 700; }
+  h2::before { content: "// "; color: var(--accent); font-weight: 400; }
+  p { color: var(--muted); margin-bottom: 14px; }
+  p strong, li strong { color: var(--text); font-weight: 600; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+  .card:hover { border-color: rgba(61, 214, 197, 0.5); transform: translateY(-2px); }
+  .card h3 { font-size: 15px; margin-bottom: 6px; color: var(--accent); }
+  .card p { font-size: 13.5px; margin: 0; }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.65;
+    margin: 10px 0 20px;
+    color: #c9d6e5;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: rgba(255,255,255,0.06);
+    border-radius: 4px;
+    padding: 1px 6px;
+  }
+  pre code { background: none; padding: 0; }
+  ul.tight { margin: 0 0 16px 22px; color: var(--muted); }
+  ul.tight li { margin-bottom: 6px; }
+  .tree { font-size: 13px; }
+  .ok { color: var(--ok); }
+  .warn { color: var(--warn); }
+  footer {
+    margin-top: 72px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  @media (max-width: 640px) {
+    header { padding: 48px 0 32px; }
+    h1 { font-size: 30px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <span class="badge">iOS · 越狱 / TrollStore</span>
+    <h1>AI逆向助手 <span>AIReverse</span></h1>
+    <p class="subtitle">一个可安装在 iOS 设备上的 <strong>AI 聊天式逆向分析工具</strong>：本地解析 Mach-O / IPA / App，并把分析结果注入 AI 上下文，用自然语言完成解读、排查与破解辅助。</p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <h2>这是什么</h2>
+  <p><strong>AIReverse</strong> 是一个纯 Swift 实现的 iOS 逆向工作台。它不依赖 Ghidra / IDA，直接在设备上解析 Mach-O fat/64 头、Load Commands、ObjC 类与方法、符号表与字符串，然后以 OpenAI 兼容的 <code>chat/completions</code> 协议把静态分析结果喂给任意大模型，实现「对着二进制聊天」。</p>
+  <p>项目已从单纯的静态分析演进为一个完整的逆向工作台：内置带工具调用的编码助手（读写文件、Git 操作）、dylib 注入、root 提权、已安装应用管理、仓库（GitHub）管理与 MCP 支持。</p>
+
+  <h2>核心功能</h2>
+  <div class="grid">
+    <div class="card"><h3>本地静态分析</h3><p>纯 Swift 解析 Mach-O（fat/64、Load Commands、segments）、ObjC 元数据、符号表、可读字符串（URL / key 等可疑串），附 ARM64 轻量反汇编。</p></div>
+    <div class="card"><h3>AI 对话解读</h3><p>分析结果自动注入系统提示，支持函数调用工具循环，可追问反汇编解读、逻辑梳理、注入点排查。</p></div>
+    <div class="card"><h3>自定义模型</h3><p>Base URL / API Key / 模型名全可配置，多套配置保存切换，兼容 DeepSeek、OpenAI、Kimi、Ollama 等任意 OpenAI 兼容接口。</p></div>
+    <div class="card"><h3>dylib 注入</h3><p>纯 Swift 注入 LC_LOAD_DYLIB（MachOEditor），替代 insert_dylib / jtool；失败自动回退 Info.plist DYLD_INSERT_LIBRARIES，适配 Relaxin / Rootless。</p></div>
+    <div class="card"><h3>编码助手</h3><p>内置工具调用编码代理：读/写文件、list_dir、git status / branch / log / commit、仓库概览，后台任务可恢复。</p></div>
+    <div class="card"><h3>root 提权</h3><p>su 提权 + RootService 守护进程 socket 双通道，自动探测 Procursus / Rootless 工具路径，权限失败给出明确引导。</p></div>
+    <div class="card"><h3>应用与文件管理</h3><p>导入 .tipa / .ipa / .app / 裸 Mach-O，扫描已安装应用，解析 .deb 包，仓库克隆与浏览，文件注入与数据修改。</p></div>
+    <div class="card"><h3>MCP 支持</h3><p>可配置多个 MCP Server，把外部工具能力接入 AI 对话，扩展工作流。</p></div>
+  </div>
+
+  <h2>构建（本地 Mac + Xcode）</h2>
+  <p>需要 macOS + Xcode 16+。仓库根目录提供一键脚本 <code>build_ipa.sh</code>：</p>
+  <pre><code>xcodebuild -project AIReverse.xcodeproj -scheme AIReverse \
+  -configuration Release -derivedDataPath build \
+  -destination 'generic/platform=iOS' \
+  CODE_SIGNING_ALLOWED=NO build
+# 产物：build/AIReverse.ipa（未签名，适配 TrollStore）</code></pre>
+
+  <h2>构建（GitHub Actions，无需 Mac）</h2>
+  <p>仓库自带 <code>.github/workflows/build-ipa.yml</code>：在 GitHub 仓库 Actions 页手动运行 <strong>Build IPA</strong> workflow（或推送 <code>v*</code> tag 自动触发），在运行详情页下载 <code>AIReverse.ipa</code> 产物，用 TrollStore 打开安装即可。</p>
+
+  <h2>安装与配置</h2>
+  <ul class="tight">
+    <li>用 TrollStore 打开并安装生成的 <code>.ipa</code>（越狱环境也可用其他方式安装）。</li>
+    <li>首次使用：在「模型设置」添加模型（Base URL / API Key / 模型名）。</li>
+    <li>「分析」选择目标文件 → 切到「AI 对话」开始提问。</li>
+    <li>需要注入 / 修改系统级文件时：按引导配置 root 权限（NewTerm 中 <code>su root</code> 启动 <code>/var/mobile/root_service</code>，或配置 LaunchDaemon 以 root 运行）。</li>
+  </ul>
+
+  <h2>项目结构</h2>
+  <pre class="tree"><code>AIReverse.xcodeproj          # Xcode 工程（同步文件组，自动包含源码）
+AIReverse/
+├── AIReverseApp.swift       # App 入口
+├── Models/                  # 模型配置 / 聊天 / MCP 配置
+├── Services/                # 核心引擎
+│   ├── MachOParser.swift        # Mach-O 解析
+│   ├── ObjCParser.swift         # ObjC 元数据解析
+│   ├── ARM64Disassembler.swift  # ARM64 反汇编
+│   ├── MachOEditor.swift        # 纯 Swift LC_LOAD_DYLIB 注入
+│   ├── InjectionManager.swift   # dylib 注入编排（ldid / su / RootService）
+│   ├── CodingAgent.swift        # 工具调用编码助手
+│   ├── LLMClient.swift          # OpenAI 兼容聊天客户端
+│   ├── GitHubAPIClient.swift    # 仓库管理
+│   └── ...                      # 安装应用扫描 / deb / 日志 / 工作区等
+├── RootService/             # root 守护进程（C 源码，build.sh 编译）
+└── Views/                   # 聊天 / 分析 / 设置 / 日志界面
+build_ipa.sh                 # 一键构建打包脚本
+.github/workflows/build-ipa.yml</code></pre>
+
+  <h2>环境与密钥</h2>
+  <p>构建与运行 <strong>不需要任何环境变量或 API Key</strong>。唯一的密钥是 AI 模型服务的 API Key，在 App 内「模型设置」里填写，数据直接发送到你配置的服务，不经过任何第三方中转。</p>
+  <p><span class="ok">✔</span> 本地编译：macOS + Xcode 16+（本容器无 Swift/Xcode 工具链，验证需在 Mac 或 GitHub Actions 完成）。<br>
+     <span class="warn">⚠</span> 本预览为项目文档静态页；真实产物是 iOS 原生 App，无法在浏览器中运行。</p>
+
+  <h2>说明</h2>
+  <p>本工具仅用于合规的安全研究、CTF、自身 App 的调试分析等正当用途。</p>
+
+  <footer>
+    <span>AI逆向助手 · AIReverse</span>
+    <span>SwiftUI · 纯本地静态分析 · OpenAI 兼容</span>
+  </footer>
+</main>
+</body>
+</html>
