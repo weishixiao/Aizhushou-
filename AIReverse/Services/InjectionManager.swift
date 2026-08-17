@@ -122,23 +122,23 @@ final class InjectionManager: ObservableObject {
             throw InjectionError.dylibNotFound(dylibPath)
         }
 
-        // 确认目标 App bundle 和主二进制存在
+        // 确认目标 App bundle 存在
         let appBundle = app.bundlePath
-        let binaryName = (appBundle as NSString).lastPathComponent
-        let mainBinary = (appBundle as NSString).appendingPathComponent(binaryName)
-
-        var binExists = false
-        mainBinary.withCString { ptr in binExists = access(ptr, F_OK) == 0 }
-        if !binExists {
-            RuntimeLogger.shared.error("注入", "目标主二进制不存在: \(mainBinary)")
-            throw InjectionError.targetNotFound(mainBinary)
-        }
 
         var bundleExists = false
         appBundle.withCString { ptr in bundleExists = access(ptr, F_OK) == 0 }
         if !bundleExists {
             RuntimeLogger.shared.error("注入", "目标 App bundle 不存在: \(appBundle)")
             throw InjectionError.targetNotFound(appBundle)
+        }
+
+        // 定位主二进制（优先 Info.plist CFBundleExecutable，回退 bundle 名去 .app）
+        let mainBinary = locateMainBinary(in: appBundle)
+        var binExists = false
+        mainBinary.withCString { ptr in binExists = access(ptr, F_OK) == 0 }
+        if !binExists {
+            RuntimeLogger.shared.error("注入", "目标主二进制不存在: \(mainBinary)")
+            throw InjectionError.targetNotFound(mainBinary)
         }
 
         // 确认 root 权限可用（直接 root / su / RootService 任一即可）
@@ -173,6 +173,33 @@ final class InjectionManager: ObservableObject {
             RuntimeLogger.shared.error("注入", "注入失败：\(error.localizedDescription)")
             throw error
         }
+    }
+
+    /// 定位 App bundle 的主二进制：
+    /// 1. Info.plist CFBundleExecutable（最准确）
+    /// 2. bundle 名去掉 .app 后缀（如 Foo.app → Foo）
+    /// 3. bundle 名原样（带 .app）
+    private func locateMainBinary(in appBundle: String) -> String {
+        let infoPlist = (appBundle as NSString).appendingPathComponent("Info.plist")
+        if let dict = NSDictionary(contentsOfFile: infoPlist),
+           let exec = dict["CFBundleExecutable"] as? String, !exec.isEmpty {
+            let candidate = (appBundle as NSString).appendingPathComponent(exec)
+            var exists = false
+            candidate.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+            if exists { return candidate }
+        }
+
+        let bundleName = (appBundle as NSString).lastPathComponent
+        var execName = bundleName
+        if execName.hasSuffix(".app") {
+            execName = String(execName.dropLast(4))
+        }
+        let trimmed = (appBundle as NSString).appendingPathComponent(execName)
+        var trimmedExists = false
+        trimmed.withCString { ptr in trimmedExists = access(ptr, F_OK) == 0 }
+        if trimmedExists { return trimmed }
+
+        return (appBundle as NSString).appendingPathComponent(bundleName)
     }
 
     private func doInject(

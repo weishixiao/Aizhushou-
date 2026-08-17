@@ -374,6 +374,7 @@ struct InjectPluginSheet: View {
         let extractDir = debURL.deletingLastPathComponent().appendingPathComponent("extracted_\(debURL.lastPathComponent)")
 
         // 1. 纯 Swift 解压（Relaxin / 精简越狱环境最可靠）
+        var swiftErrorDetail: String?
         do {
             let dylibs = try DebExtractor.extractDylibs(from: debURL, into: extractDir)
             if let first = dylibs.first {
@@ -383,7 +384,9 @@ struct InjectPluginSheet: View {
             }
             RuntimeLogger.shared.warning("deb", "纯 Swift 解压完成但未找到 .dylib，尝试 dpkg-deb 回退")
         } catch {
-            RuntimeLogger.shared.warning("deb", "纯 Swift 解压失败（\(error.localizedDescription)），尝试 dpkg-deb 回退")
+            let detail = error.localizedDescription
+            swiftErrorDetail = detail
+            RuntimeLogger.shared.warning("deb", "纯 Swift 解压失败（\(detail)），尝试 dpkg-deb 回退")
         }
 
         // 2. dpkg-deb 回退（PATH 覆盖 /var/jb/usr/bin）
@@ -398,10 +401,18 @@ struct InjectPluginSheet: View {
             return
         }
 
-        let dpkgDetail = dpkgOut.contains("posix_spawn") ? "（dpkg-deb 命令不存在，请安装 dpkg 或提供 gzip 压缩的 deb）" : dpkgOut
+        let dpkgDetail = dpkgOut.contains("posix_spawn") ? "（dpkg-deb 命令不存在，请安装 dpkg）" : dpkgOut
         RuntimeLogger.shared.error("deb", "deb 解压全部失败：\(dpkgDetail.isEmpty ? "未知错误" : dpkgDetail)")
         dylibURL = nil
-        errorMessage = "无法从 .deb 包中提取 dylib 文件。\(dpkgDetail.isEmpty ? "请确认包内包含 .dylib 插件。" : dpkgDetail)"
+        var message = "无法从 .deb 包中提取 dylib 文件。"
+        if let swiftErrorDetail {
+            message += "\n\nSwift 解压原因：\(swiftErrorDetail)"
+        }
+        if !dpkgDetail.isEmpty {
+            message += "\n\ndpkg-deb 回退：\(dpkgDetail)"
+        }
+        message += "\n\n请确认 deb 为 gzip 压缩且包内含 .dylib 插件。"
+        errorMessage = message
     }
 
     /// 递归在目录中查找第一个 .dylib 文件
