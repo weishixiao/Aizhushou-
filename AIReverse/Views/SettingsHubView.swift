@@ -1,6 +1,9 @@
 import SwiftUI
+import UIKit
 
 struct SettingsHubView: View {
+    let agent: CodingAgent
+
     var body: some View {
         List {
             Section("功能区") {
@@ -56,6 +59,17 @@ struct SettingsHubView: View {
                         color: .red,
                         title: "注入检测",
                         subtitle: "4 种原理检测当前进程注入，监控运行时 dylib 加载"
+                    )
+                }
+
+                NavigationLink {
+                    RepoManagerView(agent: agent)
+                } label: {
+                    featureRow(
+                        icon: "folder.fill",
+                        color: .brown,
+                        title: "仓库管理",
+                        subtitle: "GitHub/Gitee 仓库导入、本地工作区管理"
                     )
                 }
             }

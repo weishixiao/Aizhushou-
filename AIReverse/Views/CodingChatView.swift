@@ -10,8 +10,8 @@ struct CodingChatView: View {
     @StateObject private var agent: CodingAgent
 
     @State private var inputText = ""
-    @State private var showRepoSettings = false
     @State private var showModelSettings = false
+    @State private var showWorkspaceView = false
     @State private var showUploadPicker = false
     @State private var uploadedFileName: String?
     @State private var uploadedFileURL: URL?
@@ -55,14 +55,12 @@ struct CodingChatView: View {
             }
 
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 14) {
-                    Button {
-                        showRepoSettings = true
-                    } label: {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundColor(accent)
-                    }
+                Button {
+                    showWorkspaceView = true
+                } label: {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(accent)
                 }
             }
 
@@ -79,22 +77,22 @@ struct CodingChatView: View {
                     }
             }
         }
-        .sheet(isPresented: $showRepoSettings) {
+        .sheet(isPresented: $showModelSettings) {
             NavigationView {
-                RepoManagerView(agent: agent)
+                SettingsHubView(agent: agent)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("完成") { showRepoSettings = false }
+                            Button("完成") { showModelSettings = false }
                         }
                     }
             }
         }
-        .sheet(isPresented: $showModelSettings) {
+        .sheet(isPresented: $showWorkspaceView) {
             NavigationView {
-                SettingsHubView()
+                LocalWorkspaceView(workspace: agent.workspace)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("完成") { showModelSettings = false }
+                            Button("完成") { showWorkspaceView = false }
                         }
                     }
             }

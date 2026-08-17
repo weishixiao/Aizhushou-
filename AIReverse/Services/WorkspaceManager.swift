@@ -253,6 +253,48 @@ final class WorkspaceManager: ObservableObject {
         return url.lastPathComponent
     }
 
+    /// 将外部文件导入工作区（复制到目标相对路径，目录自动创建）
+    func importFile(from sourceURL: URL, to relativePath: String) throws {
+        guard let root = workspaceRoot else { throw WorkspaceError.emptyPath }
+        let dest = try resolve(relativePath)
+        try fileManager.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if fileManager.fileExists(atPath: dest.path) {
+            _ = try fileManager.replaceItemAt(dest, withItemAt: sourceURL)
+        } else {
+            try fileManager.copyItem(at: sourceURL, to: dest)
+        }
+    }
+
+    /// 读取工作区内文件原始数据（用于导出下载）
+    func readData(_ relativePath: String) throws -> Data {
+        let url = try resolve(relativePath)
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else {
+            throw WorkspaceError.notFound(relativePath)
+        }
+        do {
+            return try Data(contentsOf: url)
+        } catch {
+            throw WorkspaceError.readFailed(relativePath, error)
+        }
+    }
+
+    /// 在工作区创建目录
+    func createDirectory(_ relativePath: String) throws {
+        let dest = try resolve(relativePath)
+        try fileManager.createDirectory(at: dest, withIntermediateDirectories: true)
+    }
+
+    /// 删除工作区内文件或目录（相对路径）
+    func deleteItem(_ relativePath: String) throws {
+        let url = try resolve(relativePath)
+        var isDir: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir) else {
+            throw WorkspaceError.notFound(relativePath)
+        }
+        try fileManager.removeItem(at: url)
+    }
+
     /// 生成工作区快照
     func snapshot(branch: String = "main", remoteURL: String? = nil, commitHash: String = "") -> WorkspaceSnapshot {
         var files: [String: FileState] = [:]
