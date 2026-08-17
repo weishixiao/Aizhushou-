@@ -286,7 +286,7 @@ struct DetectionResultRow: View {
             HStack(spacing: 8) {
                 Text(result.emoji)
                 Text(result.method.rawValue)
-                    .font(.system(.subheadline, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 Text(result.found ? "发现可疑" : "未发现")
                     .font(.caption2)
