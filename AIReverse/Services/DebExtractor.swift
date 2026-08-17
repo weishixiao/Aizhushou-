@@ -99,7 +99,15 @@ enum DebExtractor {
         guard data.count >= 13 else {
             throw DebExtractError(message: "LZMA 数据过短（缺少头部）")
         }
-        var stream = compression_stream(dst_ptr: nil, dst_size: 0, src_ptr: nil, src_size: 0, state: nil)
+        var dummyIn: UInt8 = 0
+        var dummyOut: UInt8 = 0
+        var stream = compression_stream(
+            dst_ptr: UnsafeMutablePointer(&dummyOut),
+            dst_size: 0,
+            src_ptr: UnsafePointer(&dummyIn),
+            src_size: 0,
+            state: nil
+        )
         let initStatus = compression_stream_init(&stream, COMPRESSION_STREAM_DECODE, COMPRESSION_LZMA)
         guard initStatus != COMPRESSION_STATUS_ERROR else {
             throw DebExtractError(message: "LZMA 解压器初始化失败")
@@ -117,12 +125,12 @@ enum DebExtractor {
         repeat {
             stream.src_ptr = src.advanced(by: srcIndex)
             stream.src_size = data.count - srcIndex
-            stream.dst_ptr = dst.withUnsafeMutableBufferPointer { $0.baseAddress }
+            stream.dst_ptr = dst.withUnsafeMutableBufferPointer { $0.baseAddress! }
             stream.dst_size = chunkSize
             status = compression_stream_process(&stream, Int32(COMPRESSION_STREAM_FINALIZE.rawValue))
             let written = chunkSize - Int(stream.dst_size)
             if written > 0 {
-                output.append(dst.prefix(written))
+                output.append(contentsOf: dst.prefix(written))
             }
             let prevSrcIndex = srcIndex
             srcIndex = data.count - Int(stream.src_size)
