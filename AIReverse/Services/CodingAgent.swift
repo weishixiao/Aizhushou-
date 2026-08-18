@@ -53,6 +53,11 @@ final class CodingAgent: ObservableObject {
 
     private let maxToolIterations = 15
     private let conversationFileName = "conversation.json"
+    /// 连续重复调用同一工具的检测阈值（防 agent 死循环）
+    private let maxRepeatedToolCalls = 4
+    /// 本轮任务中连续重复调用的工具签名（工具名+参数）与次数
+    private var repeatedToolSignature: String?
+    private var repeatedToolCount = 0
     private let pendingTaskFileName = "pending_task.json"
 
     init(workspace: WorkspaceManager) {
@@ -150,6 +155,8 @@ final class CodingAgent: ObservableObject {
     private func runConversation(model: AIModelConfig, userText: String, appendUserMessage: Bool) async {
         isCancelled = false
         shouldKeepPendingTask = true
+        repeatedToolSignature = nil
+        repeatedToolCount = 0
         let taskID = await MainActor.run { beginBackgroundTask() }
         defer {
             Task { @MainActor in
@@ -206,6 +213,18 @@ final class CodingAgent: ObservableObject {
                     let assistantMsg = ChatMessage(role: .assistant, content: "", assistantToolCalls: calls)
                     history.append(assistantMsg)
 
+                    // 检测连续重复调用同一工具（防 agent 死循环）
+                    let firstToolName = calls.first?.name
+                    if let firstCall = calls.first {
+                        let signature = toolSignature(firstCall)
+                        if repeatedToolSignature == signature {
+                            repeatedToolCount += 1
+                        } else {
+                            repeatedToolSignature = signature
+                            repeatedToolCount = 1
+                        }
+                    }
+
                     var toolMessages: [ChatMessage] = []
                     for call in calls {
                         if isCancelled { break }
@@ -245,6 +264,28 @@ final class CodingAgent: ObservableObject {
                         }
                     }
                     history.append(contentsOf: toolMessages)
+
+                    // 达到阈值：向模型注入一次停止警告，避免继续死循环
+                    if repeatedToolCount == maxRepeatedToolCalls {
+                        history.append(ChatMessage(role: .system, content: """
+                        注意：你已连续 \(repeatedToolCount) 次用相同的工具与参数调用，说明当前思路陷入重复。
+                        请基于已获得的工具结果直接给出最终回答，不要再重复调用该工具。
+                        如果必须读取新内容，请一次读完整文件；不要反复尝试同一个操作。
+                        """))
+                        RuntimeLogger.shared.warning("Agent", "检测到重复工具调用 \(firstToolName ?? "") x\(repeatedToolCount)，已注入停止警告")
+                    }
+                    // 硬停止：重复调用超出阈值后仍继续，直接终止本轮循环
+                    if repeatedToolCount > maxRepeatedToolCalls + 2 {
+                        let stopText = "检测到连续重复执行相同工具操作，已自动停止。请换一种更直接的指令重试，或直接说明你的最终需求。"
+                        finalText = stopText
+                        RuntimeLogger.shared.warning("Agent", "重复工具调用超过硬上限，强制停止")
+                        await MainActor.run {
+                            messages.append(ChatMessage(role: .assistant, content: stopText))
+                            saveConversation()
+                            clearPendingTaskState()
+                        }
+                        break toolLoop
+                    }
                 }
             }
             if finalText == nil && !isCancelled {
@@ -360,6 +401,18 @@ final class CodingAgent: ObservableObject {
     private func truncate(_ s: String, limit: Int) -> String {
         if s.count <= limit { return s }
         return String(s.prefix(limit)) + "\n...[已截断]"
+    }
+
+    /// 生成工具调用的签名（工具名 + 排序后的参数键值），用于检测连续重复调用
+    private func toolSignature(_ call: ToolCall) -> String {
+        let keys = call.arguments.keys.sorted()
+        let args = keys.map { key in
+            if let value = call.arguments[key] {
+                return "\(key)=\(value)"
+            }
+            return key
+        }.joined(separator: "&")
+        return "\(call.name)(\(args))"
     }
 
     private func restoreConversation() {

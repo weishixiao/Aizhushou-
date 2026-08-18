@@ -667,7 +667,22 @@ struct DocumentMessageRow: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            if message.role == .assistant {
+            if message.isProgress {
+                // 进度消息：紧凑灰色小字，不占用气泡位置
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(toolIconGreen)
+                        .frame(width: 5, height: 5)
+                    Text(message.content)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+            } else if message.role == .assistant {
                 // AI 消息：左对齐，白色卡片 + 浅灰边框
                 HStack {
                     MarkdownView(content: message.content)
