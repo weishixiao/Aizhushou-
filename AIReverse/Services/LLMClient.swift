@@ -30,6 +30,7 @@ final class LLMClient {
         case invalidURL
         case network(Error)
         case badStatus(Int, String)
+        case rateLimited
         case emptyResponse
         case streamingUnsupported
 
@@ -43,6 +44,8 @@ final class LLMClient {
                 return "网络错误: \(e.localizedDescription)"
             case .badStatus(let code, let msg):
                 return "服务器返回 \(code): \(msg)"
+            case .rateLimited:
+                return "请求过于频繁，已触发服务的速率限制（429），请稍等片刻后重试"
             case .emptyResponse:
                 return "模型未返回内容"
             case .streamingUnsupported:
@@ -296,6 +299,9 @@ final class LLMClient {
             throw LLMError.network(URLError(.badServerResponse))
         }
         guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 429 {
+                throw LLMError.rateLimited
+            }
             let msg = String(data: data, encoding: .utf8) ?? ""
             throw LLMError.badStatus(http.statusCode, String(msg.prefix(500)))
         }
@@ -336,6 +342,9 @@ final class LLMClient {
             throw LLMError.network(URLError(.badServerResponse))
         }
         guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 429 {
+                throw LLMError.rateLimited
+            }
             let msg = String(data: data, encoding: .utf8) ?? ""
             throw LLMError.badStatus(http.statusCode, String(msg.prefix(500)))
         }
@@ -475,6 +484,9 @@ final class LLMClient {
             throw LLMError.network(URLError(.badServerResponse))
         }
         guard (200..<300).contains(http.statusCode) else {
+            if http.statusCode == 429 {
+                throw LLMError.rateLimited
+            }
             let msg = String(data: data, encoding: .utf8) ?? ""
             throw LLMError.badStatus(http.statusCode, String(msg.prefix(500)))
         }

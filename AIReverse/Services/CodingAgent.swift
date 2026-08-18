@@ -28,6 +28,8 @@ struct ToolCallCard: Identifiable {
 /// 聊天 + 工具调用的编排状态
 final class CodingAgent: ObservableObject {
 
+    private typealias LLMError = LLMClient.LLMError
+
     @Published var messages: [ChatMessage] = []
     @Published var toolCards: [ToolCallCard] = []
     @Published var isWorking = false
@@ -197,10 +199,11 @@ final class CodingAgent: ObservableObject {
                 await MainActor.run {
                     updateStage("分析任务上下文", model: model, prompt: userText)
                 }
-                let reply = try await client.chat(
+                let reply = try await chatWithRetry(
                     model: model,
                     messages: history,
-                    tools: registry.openAIDefinitions(includeMutating: allowMutating)
+                    tools: registry.openAIDefinitions(includeMutating: allowMutating),
+                    userText: userText
                 )
                 switch reply {
                 case .text(let content):
@@ -414,6 +417,27 @@ final class CodingAgent: ObservableObject {
     private func truncate(_ s: String, limit: Int) -> String {
         if s.count <= limit { return s }
         return String(s.prefix(limit)) + "\n...[已截断]"
+    }
+
+    /// 发送一次聊天请求，遇到 429 速率限制时指数退避重试
+    private func chatWithRetry(model: AIModelConfig, messages: [ChatMessage], tools: [[String: Any]], userText: String) async throws -> LLMReply {
+        let maxRetries = 3
+        for attempt in 0...maxRetries {
+            do {
+                return try await client.chat(model: model, messages: messages, tools: tools)
+            } catch LLMError.rateLimited {
+                if attempt == maxRetries || isCancelled { throw LLMError.rateLimited }
+                let delay = 2 * pow(2, Double(attempt)) // 2, 4, 8 秒
+                let seconds = Int(delay)
+                await MainActor.run {
+                    updateStage("请求过于频繁（429），等待 \(seconds) 秒后自动重试", model: model, prompt: userText)
+                }
+                RuntimeLogger.shared.warning("LLM", "429 速率限制，第 \(attempt + 1) 次重试等待 \(seconds) 秒")
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                if isCancelled { throw LLMError.rateLimited }
+            }
+        }
+        throw LLMError.rateLimited
     }
 
     /// 生成工具调用的签名（工具名 + 排序后的参数键值），用于检测连续重复调用
