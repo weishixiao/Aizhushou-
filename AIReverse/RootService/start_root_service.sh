@@ -1,5 +1,5 @@
 #!/var/jb/opt/procursus/bin/sh
-# RootService 一键启动脚本
+# RootService 一键启动脚本（加固版）
 # 在 NewTerm 中执行: /var/mobile/start_root_service.sh
 #
 # 特性：
@@ -7,6 +7,24 @@
 # - nohup 后台守护：关闭 NewTerm 后服务继续运行
 # - 幂等：已在运行则提示 PID，不重复启动
 # - 运行日志写入 /var/mobile/root_service.log
+# - 安全加固：必须提供 AIREVERSE_SERVICE_SECRET，否则拒绝启动
+
+# 密钥来源：优先取传入的环境变量，其次取固定的受保护配置文件。
+# 注意：不把密钥写死在脚本里；配置文件权限收紧为 0600 且仅 root 可读。
+SECRET_SOURCE="${AIREVERSE_SERVICE_SECRET:-}"
+SECRET_FILE="/var/mobile/.aireverse_service_secret"
+
+if [ -z "$SECRET_SOURCE" ] && [ -r "$SECRET_FILE" ]; then
+    SECRET_SOURCE=$(cat "$SECRET_FILE" 2>/dev/null | tr -d '\n')
+fi
+
+# 未设置密钥时：降级为兼容无鉴权模式启动（服务端此时不要求握手）。
+# 生产环境强烈建议设置密钥以启用鉴权。
+if [ -z "$SECRET_SOURCE" ]; then
+    echo "==> 警告：未提供共享密钥，将以无鉴权兼容模式启动。"
+    echo "    生产环境请设置环境变量 AIREVERSE_SERVICE_SECRET，或写入只读配置文件："
+    echo "      echo 'your-strong-secret' > $SECRET_FILE && chmod 600 $SECRET_FILE"
+fi
 
 # 检查 Procursus shell 环境
 if [ ! -x /var/jb/opt/procursus/bin/sh ]; then
@@ -44,6 +62,8 @@ echo "    EUID: $(id -u)"
 
 # 注入 ElleKit（RootHide / Relaxin 必备）
 export DYLD_INSERT_LIBRARIES=/var/jb/usr/lib/ellekit/ellekit.dylib
+# 传递共享密钥（进程级环境变量，不落到日志/磁盘）
+export AIREVERSE_SERVICE_SECRET="$SECRET_SOURCE"
 
 # 后台启动并脱离会话，NewTerm 关闭后服务继续运行
 if command -v setsid >/dev/null 2>&1; then

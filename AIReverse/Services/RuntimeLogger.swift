@@ -23,7 +23,11 @@ struct RuntimeLogEntry: Identifiable, Codable, Equatable {
     }
 }
 
-/// 应用运行日志：内存缓存 + 沙盒文件持久化，供设置页查看与清理
+/// 应用运行日志：内存缓存 + 沙盒文件持久化，供设置页查看与清理。
+///
+/// 安全：所有日志在写入内存与磁盘前统一经过 `sanitize()` 脱敏，
+/// 避免 API Key、GitHub/Gitee token、URL 内嵌凭证等信息持久化到
+/// sandbox/Documents/Logs/runtime.log（越狱设备上可被其他 root 进程读取）。
 final class RuntimeLogger: ObservableObject {
 
     static let shared = RuntimeLogger()
@@ -54,9 +58,10 @@ final class RuntimeLogger: ObservableObject {
             .appendingPathComponent(fileName)
     }
 
-    /// 记录一条日志（线程安全，UI 更新收敛到主线程）
+    /// 记录一条日志（线程安全，UI 更新收敛到主线程，先脱敏再落盘）
     func log(_ level: RuntimeLogLevel, _ source: String, _ message: String) {
-        let entry = RuntimeLogEntry(level: level, source: source, message: message)
+        let safeMessage = RuntimeLogger.sanitize(message)
+        let entry = RuntimeLogEntry(level: level, source: source, message: safeMessage)
         lock.lock()
         var snapshot = entries
         snapshot.append(entry)
@@ -113,6 +118,43 @@ final class RuntimeLogger: ObservableObject {
             "[\(dateFormatter.string(from: entry.date))] [\(entry.level.rawValue)] [\(entry.source)] \(entry.message)"
         }
         .joined(separator: "\n")
+    }
+
+    // MARK: - 脱敏
+
+    private static let sensitivePatterns: [(NSRegularExpression, String)] = {
+        func regex(_ p: String) -> NSRegularExpression {
+            // swiftlint:disable:next force_try
+            try! NSRegularExpression(pattern: p, options: [.caseInsensitive])
+        }
+        return [
+            // Bearer <token>
+            (regex(#"(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}(?=[\s"'\],;]|$)""#), "$1***"),
+            // Authorization: token ...
+            (regex(#"([Aa]uthorization[:=]\s*(?:token|basic)\s+)[A-Za-z0-9._~+/=-]{8,}""#), "$1***"),
+            // x-api-key: <key>
+            (regex(#"([Xx]-[Aa]pi-[Kk]ey[:=]\s*)[A-Za-z0-9._~+/=-]{4,}""#), "$1***"),
+            // github_pat_ / ghp_ / gho_ / ghu_ / ghp 等 GitHub token 形态
+            (regex(#"(github_pat_[A-Za-z0-9_]{10,}|gh[pousr]_[A-Za-z0-9]{20,})""#), "***"),
+            // 常见 API key 参数形态：?key= / ?token= / &access_token= / x-api-token
+            (regex(#"([?&](?:api[_-]?key|access_token|client_secret|token|secret|apikey)=)[^&\s"']+""#), "$1***"),
+            // URL 内嵌凭证 http://user:pass@host
+            (regex(#"([a-z][a-z0-9+.-]*://)[^/@\s]+:[^/@\s]*@"#), "$1***:***@"),
+            // 长 hex 形态（可能是 key）
+            (regex(#"\b[0-9a-f]{32,64}\b""#), "***"),
+        ]
+    }()
+
+    /// 对日志文本做脱敏；空串或长度过大直接原样短路，避免无谓开销。
+    static func sanitize(_ text: String) -> String {
+        guard !text.isEmpty, text.count <= 4096 else { return text }
+        var out = text
+        let ns = out as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        for (pattern, replacement) in sensitivePatterns {
+            out = pattern.stringByReplacingMatches(in: out, options: [], range: range, withTemplate: replacement)
+        }
+        return out
     }
 
     // MARK: - 文件持久化

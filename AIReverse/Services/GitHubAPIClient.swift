@@ -403,7 +403,7 @@ final class GitHubAPIClient {
     // MARK: - HTTP helpers
 
     private func makeRequest(_ urlStr: String, token: String) throws -> URLRequest {
-        guard var url = URL(string: urlStr) else { throw GitHubError.badURL(urlStr) }
+        guard let url = URL(string: urlStr) else { throw GitHubError.badURL(urlStr) }
         var request = URLRequest(url: url)
         request.timeoutInterval = 60
         request.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -412,14 +412,9 @@ final class GitHubAPIClient {
             case .github:
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             case .gitee:
-                // Gitee 支持 Authorization: token 头或 access_token 查询参数
+                // Gitee 支持 Authorization: token 头。切勿再把 token 追加进 URL query，
+                // 否则会出现在代理/网关日志、Referer、缓存等位置，造成凭证泄露。
                 request.setValue("token \(token)", forHTTPHeaderField: "Authorization")
-                var comps = URLComponents(url: url, resolvingAgainstBaseURL: false)
-                var items = comps?.queryItems ?? []
-                items.append(URLQueryItem(name: "access_token", value: token))
-                comps?.queryItems = items
-                if let u = comps?.url { url = u }
-                request.url = url
             }
         }
         request.setValue("AIReverse/1.0", forHTTPHeaderField: "User-Agent")

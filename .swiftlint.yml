@@ -1,0 +1,45 @@
+# SwiftLint 规则配置（在 Xcode / CI 中使用）
+# 安装：brew install swiftlint
+
+disabled_rules:
+  - trailing_whitespace
+  - line_length            # 项目大量使用长行，放宽
+
+opt_in_rules:
+  - empty_count
+  - closure_end_indentation
+  - empty_string
+  - force_unwrapping       # 审计关注点：允许但建议避免，可在关键处启用
+  - first_where
+
+# 排除由 Xcode 生成的目录
+excluded:
+  - build
+  - DerivedData
+  - .build
+  - Pods
+
+# 长度阈值适当放宽，与现有代码风格一致
+line_length:
+  warning: 200
+  error: 300
+
+type_body_length:
+  warning: 500
+  error: 800
+
+function_body_length:
+  warning: 120
+  error: 250
+
+file_length:
+  warning: 800
+  error: 1200
+
+# 强制使用 Keychain 而非明文存储敏感信息属软性提醒，可自定义
+custom_rules:
+  plaintext_token:
+    name: "明文 Token 存储"
+    regex: "UserDefaults.*(key|token|secret)"
+    message: "敏感凭证请使用 Keychain 存储，避免明文落盘"
+    severity: warning

@@ -1,13 +1,49 @@
-# 构建产物
-build/
-dist/
-*.ipa
-*.app
-
-# Xcode
-xcuserdata/
-DerivedData/
-*.xcuserstate
-
 # macOS
 .DS_Store
+*.swp
+*~
+
+# Xcode / DerivedData
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.xcuserdatad
+
+# 构建产物
+*.ipa
+*.app
+*.dSYM
+build/
+AIReverse/AppIcon*.png
+
+# 越狱工具制品
+root_service
+root_service.pid
+*.deb
+lint_package
+
+# 本地日志
+*.log
+runtime.log
+
+# 密钥与敏感文件
+*.pem
+*.key
+*.mobileprovision
+.env
+.env.local
+.aireverse_service_secret
+
+# Swift Package / CocoaPods
+.build/
+.swiftpm/
+Pods/
+Podfile.lock
+
+# 测试/临时
+*.orig
+*.rej
+*.tmp
