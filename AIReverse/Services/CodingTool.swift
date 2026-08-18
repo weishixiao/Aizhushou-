@@ -130,7 +130,7 @@ final class ToolRegistry {
             return ToolResult(success: false, output: "未知工具: \(name)")
         }
         guard allowMutating || !tool.isMutating else {
-            return ToolResult(success: false, output: "当前未开启修改权限")
+            return ToolResult(success: false, output: "当前未开启修改权限，无法执行 \(name)。请先向用户说明并请用户在设置中开启「允许修改」，不要重复尝试。")
         }
         return try await tool.execute(arguments: arguments, workspace: workspace, github: github, repoConfig: repoConfig)
     }
