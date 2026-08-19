@@ -51,6 +51,10 @@ struct CodingChatView: View {
             statusBar
             messageList
             uploadStatusBar
+            // AI 工作时显示的工具栏
+            if agent.isWorking {
+                workingToolbar
+            }
             quickActionsBar
             inputBar
         }
@@ -418,6 +422,70 @@ struct CodingChatView: View {
                 .background(surface)
             }
         }
+    }
+
+    // MARK: - AI 工作工具栏
+
+    private var workingToolbar: some View {
+        HStack(spacing: 12) {
+            // 状态指示器
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(accent)
+                Text(agent.stageText ?? "处理中…")
+                    .font(.caption)
+                    .foregroundColor(textSecondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // 停止按钮
+            Button {
+                stopConversation()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 10))
+                    Text("停止")
+                        .font(.caption)
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.red.opacity(0.8))
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+
+            // 清空对话按钮
+            Button {
+                agent.resetConversation()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 10))
+                    Text("清空")
+                        .font(.caption)
+                }
+                .foregroundColor(textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(surfaceElevated)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(surface.overlay(accent.opacity(0.03)))
+        .overlay(
+            Rectangle()
+                .fill(cardBorder)
+                .frame(height: 0.5),
+            alignment: .bottom
+        )
     }
 
     // MARK: - 底部功能键（相册 / 进程）— CatPaw 暗色适配
