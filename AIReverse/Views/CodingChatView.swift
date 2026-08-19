@@ -60,13 +60,35 @@ struct CodingChatView: View {
         .preferredColorScheme(.dark)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
-                Button {
-                    showModelSettings = true
+                Menu {
+                    ForEach(modelStore.models) { model in
+                        Button {
+                            modelStore.select(model.id)
+                        } label: {
+                            Label(
+                                model.name,
+                                systemImage: modelStore.selectedModel?.id == model.id ? "checkmark.circle.fill" : "circle"
+                            )
+                        }
+                    }
+                    Button {
+                        showModelSettings = true
+                    } label: {
+                        Label("管理模型", systemImage: "slider.horizontal.3")
+                    }
                 } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(accent)
+                    HStack(spacing: 4) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(modelStore.selectedModel?.name ?? "选择模型")
+                            .font(.system(size: 14, weight: .medium))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(accent)
                 }
+                .disabled(modelStore.models.isEmpty)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -172,11 +194,8 @@ struct CodingChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(Array(agent.messages.enumerated()), id: \.element.id) { index, msg in
-                        BubbleMessageRow(
-                            message: msg,
-                            showAvatar: shouldShowAvatar(for: msg, at: index)
-                        )
-                        .id(msg.id)
+                        BubbleMessageRow(message: msg)
+                            .id(msg.id)
                     }
                 }
                 .padding(.horizontal, 12)
@@ -190,13 +209,6 @@ struct CodingChatView: View {
                 }
             }
         }
-    }
-
-    /// 判断是否显示气泡头像（连续同角色消息只首条显示）
-    private func shouldShowAvatar(for msg: ChatMessage, at index: Int) -> Bool {
-        guard index > 0 else { return true }
-        let prev = agent.messages[index - 1]
-        return prev.role != msg.role
     }
 
     // MARK: - 输入区
@@ -603,7 +615,6 @@ struct CodingChatView: View {
 /// AI 文本无背景直接渲染 Markdown；工具调用内联卡片
 private struct BubbleMessageRow: View {
     let message: ChatMessage
-    let showAvatar: Bool
 
     private let userBubble = Color(red: 0.22, green: 0.50, blue: 0.32)   // 深绿
     private let surface = Color(red: 0.15, green: 0.15, blue: 0.16)
@@ -662,11 +673,6 @@ private struct BubbleMessageRow: View {
     private var userBubbleRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Spacer(minLength: 0)
-            if showAvatar {
-                avatarSlot(role: .user)
-            } else {
-                Spacer().frame(width: 28)
-            }
             Text(message.content)
                 .font(.system(size: 15))
                 .foregroundColor(.white)
@@ -690,11 +696,6 @@ private struct BubbleMessageRow: View {
 
     private var aiTextRow: some View {
         HStack(alignment: .top, spacing: 8) {
-            if showAvatar {
-                avatarSlot(role: .assistant)
-            } else {
-                Spacer().frame(width: 28)
-            }
             VStack(alignment: .leading, spacing: 2) {
                 MarkdownView(content: message.content)
                     .foregroundColor(textPrimary)
@@ -704,7 +705,7 @@ private struct BubbleMessageRow: View {
                         .foregroundColor(textTime)
                 }
             }
-            .frame(maxWidth: UIScreen.main.bounds.width * 0.78, alignment: .leading)
+            .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .leading)
             Spacer(minLength: 0)
         }
     }
@@ -760,21 +761,6 @@ private struct BubbleMessageRow: View {
             return Color(red: 0.95, green: 0.45, blue: 0.45)
         }
         return accent
-    }
-
-    // MARK: 头像占位（连续同角色用空白占位保持对齐）
-
-    @ViewBuilder
-    private func avatarSlot(role: ChatMessage.Role) -> some View {
-        let size: CGFloat = 28
-        ZStack {
-            Circle()
-                .fill(role == .user ? accent.opacity(0.2) : surfaceElevated)
-                .frame(width: size, height: size)
-            Image(systemName: role == .user ? "person.fill" : "sparkles")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(role == .user ? accent : textSecondary)
-        }
     }
 
     // MARK: 工具名中文映射

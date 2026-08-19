@@ -339,7 +339,6 @@ final class CodingAgent: ObservableObject {
     }
 
     // 过渡性阶段文本；属于 UI 顶部状态栏展示，不写入历史消息
-    // 工具执行类阶段（执行工具：X / 工具执行完成：X）才写入历史，帮助用户回溯
     private let transientStages: Set<String> = [
         "分析任务上下文",
         "准备发送请求",
@@ -349,14 +348,25 @@ final class CodingAgent: ObservableObject {
         "后台执行超时",
         "任务已暂停"
     ]
+    // 工具执行阶段前缀：以此为前缀的也视为过渡
+    private let transientStagePrefixes: [String] = [
+        "执行工具：",
+        "工具执行完成：",
+        "工具执行失败：",
+    ]
+
+    private func isTransientStage(_ text: String) -> Bool {
+        if transientStages.contains(text) { return true }
+        return transientStagePrefixes.contains { text.hasPrefix($0) }
+    }
 
     @MainActor
     private func updateStage(_ text: String, model: AIModelConfig, prompt: String) {
         stageText = text
         if stageHistory.last != text {
             stageHistory.append(text)
-            // 过渡性阶段仅更新顶部状态栏，不写入历史消息（避免「分析任务上下文」在反复工具调用时大量重复）
-            if !transientStages.contains(text) {
+            // 过渡性阶段仅更新顶部状态栏，不写入历史消息
+            if !isTransientStage(text) {
                 messages.append(ChatMessage(role: .assistant, content: text, isProgress: true))
                 saveConversation()
             }
