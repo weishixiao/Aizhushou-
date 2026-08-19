@@ -79,13 +79,16 @@ final class InstalledApps {
                 let version = info["CFBundleShortVersionString"] as? String ?? ""
                 let executable = info["CFBundleExecutable"] as? String ?? ""
 
+                // 获取应用显示名称（优先 CFBundleDisplayName → CFBundleName → CFBundleExecutable）
+                let displayName = appDisplayName(from: info, executable: executable)
+
                 // 多级过滤：跳过系统应用
                 if isSystemApp(bundleID: bundleID, executable: executable) { continue }
 
                 let iconData = loadIcon(from: appPath, info: info)
 
                 apps.append(InstalledApp(
-                    displayName: executable,
+                    displayName: displayName,
                     bundleID: bundleID,
                     bundlePath: appPath,
                     version: version,
@@ -120,6 +123,20 @@ final class InstalledApps {
         if lowerBundleID.contains("mobilegestalt") { return true }
 
         return false
+    }
+
+    /// 获取应用显示名称（优先级：CFBundleDisplayName > CFBundleName > CFBundleExecutable）
+    private func appDisplayName(from info: NSDictionary, executable: String) -> String {
+        // 优先使用 CFBundleDisplayName（用户可见的显示名称）
+        if let displayName = info["CFBundleDisplayName"] as? String, !displayName.isEmpty {
+            return displayName
+        }
+        // 其次使用 CFBundleName（应用名称）
+        if let name = info["CFBundleName"] as? String, !name.isEmpty {
+            return name
+        }
+        // 最后回退到可执行文件名
+        return executable
     }
 
     /// 加载应用图标（优化版）
