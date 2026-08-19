@@ -210,7 +210,7 @@ final class InjectionManager: ObservableObject {
         }
 
         // sudo 探测
-        let (sudoCode, sudoOut) = executeWithTimeout(command: "sudo -n -u root -s /bin/sh -c 'whoami' 2>&1; echo EXIT\(?\)", environment: ["PATH": jbPath], timeoutSeconds: 4)
+        let (sudoCode, sudoOut) = executeWithTimeout(command: "sudo -n -u root -s /bin/sh -c 'whoami' 2>&1; echo EXIT\\(?\\)", environment: ["PATH": jbPath], timeoutSeconds: 4)
         lines.append("sudo: code=\(sudoCode) out=\(sudoOut.trimmingCharacters(in: .whitespacesAndNewlines))")
 
         // RootService 探测
