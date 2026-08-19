@@ -222,6 +222,8 @@ struct InjectPluginSheet: View {
     @State private var resultMessage: String?
     @State private var errorMessage: String?
     @State private var forceJailbreak = false
+    @State private var rootPassword = ""
+    @State private var diagnosticResult: String?
 
     /// 越狱类型，注入时直接映射为硬编码路径，避免字符串被截断
     @State private var jailbreakType: JBType = .rootless
@@ -317,6 +319,38 @@ struct InjectPluginSheet: View {
                         Text(errorMessage)
                             .font(.callout)
                             .foregroundColor(.red)
+                    }
+                }
+
+                // 权限诊断 + root 密码
+                Section {
+                    HStack {
+                        Text("root 密码")
+                        Spacer()
+                        TextField("alpine", text: $rootPassword)
+                            .multilineTextAlignment(.trailing)
+                            .font(.system(.callout, design: .monospaced))
+                    }
+                    Button {
+                        runDiagnostic()
+                    } label: {
+                        HStack {
+                            Image(systemName: "stethoscope")
+                            Text(diagnosticResult == nil ? "诊断权限" : "重新诊断")
+                        }
+                    }
+                    .disabled(isInjecting)
+                } footer: {
+                    Text("默认密码为 alpine。诊断会测试 su 提权与 RootService 连通性。")
+                }
+
+                if let diagnosticResult {
+                    Section {
+                        Text(diagnosticResult)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    } header: {
+                        Text("诊断结果")
                     }
                 }
             }
@@ -441,6 +475,10 @@ struct InjectPluginSheet: View {
             return
         }
 
+        // 保存 root 密码（用于 su 密码回退）
+        let pwd = rootPassword.trimmingCharacters(in: .whitespacesAndNewlines)
+        UserDefaults.standard.set(pwd.isEmpty ? "alpine" : pwd, forKey: "root_password")
+
         isInjecting = true
         resultMessage = nil
         errorMessage = nil
@@ -471,6 +509,16 @@ struct InjectPluginSheet: View {
             Text(value)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// 运行 root 提权诊断
+    private func runDiagnostic() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = InjectionManager.shared.diagnoseRootAccess()
+            DispatchQueue.main.async {
+                diagnosticResult = result
+            }
         }
     }
 }

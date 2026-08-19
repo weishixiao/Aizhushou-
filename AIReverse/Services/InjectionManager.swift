@@ -86,6 +86,7 @@ final class InjectionManager: ObservableObject {
             "/bin/su",                      // 传统越狱备选
         ]
         var suTried = 0
+        var suErrors: [String] = []
         for suPath in suPaths {
             var exists = false
             suPath.withCString { ptr in exists = access(ptr, F_OK) == 0 }
@@ -102,11 +103,35 @@ final class InjectionManager: ObservableObject {
                 if result.0 == 0 {
                     return result
                 }
+                suErrors.append("\(suPath): code=\(result.0) out=\(result.1.prefix(80))")
             }
-            RuntimeLogger.shared.warning("注入", "su 路径 \(suPath) 失败（可能需密码或超时），继续尝试…")
         }
         if suTried == 0 {
             RuntimeLogger.shared.warning("注入", "未找到任何 su 二进制文件（已搜索 \(suPaths.count) 个路径）")
+        }
+
+        // 尝试 1b：su + 密码回退（默认 alpine）
+        let rootPassword = UserDefaults.standard.string(forKey: "root_password") ?? "alpine"
+        for suPath in suPaths {
+            var exists = false
+            suPath.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+            guard exists else { continue }
+            // 通过管道输入密码
+            let passCmd = "printf '%s\\n' '\(rootPassword)' | \(suPath) root -c '\(escaped)' < /dev/null"
+            let result = executeWithTimeout(command: passCmd, environment: environment, timeoutSeconds: 6)
+            if result.0 == 0 {
+                RuntimeLogger.shared.info("注入", "su 密码回退成功: \(suPath)")
+                return result
+            }
+            // 也尝试空密码
+            if rootPassword != "" {
+                let emptyPassCmd = "printf '%s\\n' '' | \(suPath) root -c '\(escaped)' < /dev/null"
+                let emptyResult = executeWithTimeout(command: emptyPassCmd, environment: environment, timeoutSeconds: 4)
+                if emptyResult.0 == 0 {
+                    RuntimeLogger.shared.info("注入", "su 空密码成功: \(suPath)")
+                    return emptyResult
+                }
+            }
         }
 
         // 尝试 2：尝试静默启动 RootService，再走 socket
@@ -121,9 +146,39 @@ final class InjectionManager: ObservableObject {
             return (0, result)
         } catch {
             let errMsg = error.localizedDescription
-            let suHint = suTried == 0 ? "\n未检测到 su 文件（越狱可能未完整加载）" : "\n尝试了 \(suTried) 个 su 路径均未成功"
-            return (-1, "无法获取 root 权限\nsu 提权失败，RootService 不可用: \(errMsg)\(suHint)")
+            let suHint = suTried == 0 ? "\n未检测到 su 文件（越狱可能未完整加载）" : "\n尝试了 \(suTried) 个 su 路径（含密码回退）均未成功"
+            let detail = suErrors.isEmpty ? "" : "\n调试: \(suErrors.prefix(3).joined(separator: "; "))"
+            return (-1, "无法获取 root 权限\nsu 提权失败，RootService 不可用: \(errMsg)\(suHint)\(detail)")
         }
+    }
+
+    /// 诊断 root 提权能力（供 UI 调用）
+    func diagnoseRootAccess() -> String {
+        var lines: [String] = []
+        lines.append("isRoot: \(rt.isRoot)")
+        lines.append("isJailbroken: \(rt.isJailbroken)")
+        lines.append("currentUID: \(rt.currentUID)")
+
+        // su 路径探测
+        let suPaths = [
+            "/var/jb/bin/su", "/var/jb/usr/bin/su",
+            "/var/jb/opt/procursus/bin/su", "/var/jb/opt/bin/su",
+            "/usr/bin/su", "/bin/su",
+        ]
+        for path in suPaths {
+            var exists = false
+            path.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+            if exists {
+                let (code, out) = executeWithTimeout(command: "\(path) -c 'whoami'", environment: ["PATH": jbPath], timeoutSeconds: 3)
+                lines.append("\(path): exists, code=\(code), out=\(out.trimmingCharacters(in: .whitespacesAndNewlines))")
+            }
+        }
+
+        // RootService 探测
+        let rsc = RootServiceClient.shared
+        lines.append("RootService running: \(rsc.isServiceRunning)")
+
+        return lines.joined(separator: "\n")
     }
 
     /// 尝试启动 RootService 后台服务（当 socket 不可用时）
