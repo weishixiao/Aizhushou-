@@ -68,7 +68,33 @@ struct CodingChatView: View {
                         .foregroundColor(accent)
                 }
             }
-            ToolbarItem(placement: .navigationBarTrailing) {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                // 快速切换模型
+                Menu {
+                    ForEach(modelStore.models) { model in
+                        Button {
+                            modelStore.select(model.id)
+                        } label: {
+                            Label(
+                                model.name,
+                                systemImage: modelStore.selectedModel?.id == model.id ? "checkmark.circle.fill" : "circle"
+                            )
+                        }
+                    }
+                    Divider()
+                    Button {
+                        showModelSettings = true
+                    } label: {
+                        Label("管理模型", systemImage: "gearshape")
+                    }
+                } label: {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(accent)
+                }
+                .disabled(modelStore.models.isEmpty)
+
+                // 文件管理
                 Button {
                     showWorkspaceView = true
                 } label: {
