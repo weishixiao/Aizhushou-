@@ -606,10 +606,32 @@ struct CodingChatView: View {
     private func selectTargetApp(_ app: InstalledApp) {
         showProcessSheet = false
         targetApp = app
-        agent.appendLocalMessage(
-            role: .assistant,
-            content: "已选中目标应用：**\(app.displayName)**（`\(app.bundleID)`）\n现在可以直接发送指令。"
-        )
+
+        // 收集运行时信息
+        let runtimeInfo = ProcessManager.shared.runtimeInfo(forApp: app)
+        let fridaStatus = ProcessManager.shared.checkFridaStatus()
+
+        var content = """
+        🎯 已选中目标应用
+
+        \(runtimeInfo)
+
+        ---
+        🔧 环境状态
+        \(fridaStatus.summary)
+        抓包工具: \(ProcessManager.shared.checkTcpdumpAvailable() ? "✅ tcpdump 可用" : "❌ 未安装 tcpdump")
+
+        ---
+        💡 可执行操作
+        - **内存修改**：「把金币改成9999」
+        - **抓包**：「抓取该应用网络请求」
+        - **存档修改**：「修改游戏存档」
+        - **二进制修改**：「反编译修改 Mach-O」
+
+        请直接发送指令，AI 将自动生成并执行脚本。
+        """
+
+        agent.appendLocalMessage(role: .assistant, content: content)
     }
 }
 

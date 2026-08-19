@@ -460,6 +460,15 @@ final class InjectionManager: ObservableObject {
         RuntimeLogger.shared.info("注入", "root 预检通过 ✓")
     }
 
+    // MARK: - 公共 root 执行接口（供 ProcessManager 等调用）
+
+    /// 以 root 权限执行 shell 命令（供其他 Service 复用）
+    /// - Returns: (exitCode, output) — exitCode 为 0 表示成功
+    func executeAsRoot(_ command: String, timeoutSeconds: Int = 10) -> (exitCode: Int, output: String) {
+        let result = runAsRoot(command, environment: ["PATH": jbPath])
+        return (Int(result.0), result.1)
+    }
+
     private func doInject(
         dylibPath: String,
         appBundle: String,

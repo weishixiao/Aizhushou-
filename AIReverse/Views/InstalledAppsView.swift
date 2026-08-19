@@ -22,6 +22,8 @@ struct InstalledAppsView: View {
     @State private var loadError: String?
 
     @State private var injectingApp: InstalledApp?
+    @State private var fridaStatus: ProcessManager.FridaStatus?
+    @State private var showFridaGuide = false
 
     /// 供「进程」模式把目标应用回传到主聊天视图（停留在主界面，由用户发指令）
     var onSendToChat: ((_ app: InstalledApp) -> Void)?
@@ -38,6 +40,9 @@ struct InstalledAppsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if intent == .addressToAI {
+                fridaGuideCard
+            }
             searchBar
             Divider()
             content
@@ -49,7 +54,16 @@ struct InstalledAppsView: View {
                 Button("完成") { dismiss() }
             }
         }
-        .onAppear(perform: loadApps)
+        .onAppear {
+            loadApps()
+            if intent == .addressToAI {
+                fridaStatus = ProcessManager.shared.checkFridaStatus()
+            }
+        }
+        .sheet(isPresented: $showFridaGuide) {
+            FridaInstallGuideView(status: fridaStatus)
+                .preferredColorScheme(.dark)
+        }
         .sheet(item: $injectingApp) { app in
             if #available(iOS 16.0, *) {
                 InjectPluginSheet(app: app)
@@ -79,6 +93,46 @@ struct InstalledAppsView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(Color(.systemGroupedBackground))
+    }
+
+    // MARK: - Frida 安装引导卡片
+
+    @ViewBuilder
+    private var fridaGuideCard: some View {
+        if let status = fridaStatus, !status.isRunning {
+            Button {
+                showFridaGuide = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: status.isInstalled ? "exclamationmark.triangle.fill" : "info.circle.fill")
+                        .foregroundColor(status.isInstalled ? .orange : .blue)
+                        .font(.system(size: 18))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(status.isInstalled ? "Frida 已安装但未启动" : "使用内存修改需先安装 Frida")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.primary)
+                        Text(status.summary)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(status.isInstalled ? Color.orange.opacity(0.08) : Color.blue.opacity(0.08))
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+        }
     }
 
     @ViewBuilder
@@ -531,6 +585,194 @@ struct InjectPluginSheet: View {
                 if result.contains("❌ 未找到 su 二进制") {
                     showNoSuAlert = true
                 }
+            }
+        }
+    }
+}
+
+// MARK: - Frida 安装引导页
+
+/// Frida 安装与启动引导页面
+struct FridaInstallGuideView: View {
+    let status: ProcessManager.FridaStatus?
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var isInstalling = false
+    @State private var installLog = ""
+    @State private var installDone = false
+
+    private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
+
+    var body: some View {
+        NavigationView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    // 状态摘要
+                    statusSection
+
+                    Divider()
+
+                    // 安装步骤
+                    installStepsSection
+
+                    if !installLog.isEmpty {
+                        Divider()
+                        logSection
+                    }
+
+                    if installDone && status?.isInstalled == true {
+                        Divider()
+                        startSection
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("Frida 环境配置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var statusSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("当前状态")
+                .font(.headline)
+            if let status {
+                Text(status.summary)
+                    .font(.subheadline)
+                    .foregroundColor(status.isRunning ? .green : .orange)
+            } else {
+                Text("正在检测…")
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private var installStepsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("安装步骤")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("1. 在 NewTerm 中执行以下命令：")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                Text("apt update && apt install frida")
+                    .font(.system(.caption, design: .monospaced))
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(6)
+                    .onTapGesture {
+                        UIPasteboard.general.string = "apt update && apt install frida"
+                    }
+
+                Text("（点击上方命令自动复制到剪贴板）")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
+            if status?.isInstalled == true && !isInstalling {
+                Button {
+                    installFridaIfNeeded()
+                } label: {
+                    Label("一键安装（通过 App 内 root 执行）", systemImage: "arrow.down.circle.fill")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(accent)
+            }
+
+            if isInstalling {
+                HStack {
+                    ProgressView()
+                    Text("正在安装…")
+                        .font(.caption)
+                }
+            }
+        }
+    }
+
+    private var logSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("安装日志")
+                .font(.headline)
+            Text(installLog)
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(Color(.systemGray6))
+                .cornerRadius(6)
+        }
+    }
+
+    private var startSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("启动 Frida")
+                .font(.headline)
+            Text("安装完成后，在 NewTerm 中执行：")
+                .font(.subheadline)
+
+            Text("su root -c '/var/jb/usr/bin/frida-server &'")
+                .font(.system(.caption, design: .monospaced))
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(.systemGray6))
+                .cornerRadius(6)
+                .onTapGesture {
+                    UIPasteboard.general.string = "su root -c '/var/jb/usr/bin/frida-server &'"
+                }
+
+            Text("启动后即可返回 App 使用内存修改功能。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    // MARK: - 一键安装
+
+    private func installFridaIfNeeded() {
+        guard !isInstalling else { return }
+        isInstalling = true
+        installLog = ""
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            var log = ""
+
+            // 步骤 1: apt update
+            log += "▸ apt update\n"
+            DispatchQueue.main.async { self.installLog = log }
+            let (updateCode, updateOut) = InjectionManager.shared.executeAsRoot("apt update 2>&1 | tail -5")
+            log += updateOut + "\n"
+
+            if updateCode != 0 {
+                log += "⚠️ apt update 返回非零，继续尝试安装...\n"
+            }
+
+            DispatchQueue.main.async { self.installLog = log }
+
+            // 步骤 2: apt install frida
+            log += "▸ apt install frida -y\n"
+            DispatchQueue.main.async { self.installLog = log }
+            let (installCode, installOut) = InjectionManager.shared.executeAsRoot("apt install frida -y 2>&1 | tail -10")
+            log += installOut + "\n"
+
+            if installCode == 0 {
+                log += "✅ Frida 安装成功\n"
+            } else {
+                log += "❌ 安装失败 (exit=\(installCode))\n"
+            }
+
+            DispatchQueue.main.async {
+                self.installLog = log
+                self.isInstalling = false
+                self.installDone = true
             }
         }
     }

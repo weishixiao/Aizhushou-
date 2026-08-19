@@ -412,6 +412,72 @@ final class CodingAgent: ObservableObject {
 
         修改文件前，明确告知用户你将修改哪些文件、为什么。
 
+        ════════════════════════════════════════════
+        ▸ 进程修改模式（Process Hack Mode）
+        ════════════════════════════════════════════
+        当用户发送了目标应用信息（包含 Bundle ID、可执行路径、沙盒容器路径），并发出类似以下指令时：
+        「修改金币」「改钻石为9999」「抓网络包」「修改存档」「破解内购」「反编译」「Hook 函数」
+
+        → 判定为【进程修改任务】，按以下范式处理：
+
+        【任务分类】
+        · 内存修改（金币/钻石/血量等运行时数值）
+          → 生成 Frida JS 脚本：Interpreter.attach 或 Process.enumerateModules + Memory.scan
+          → 使用 Frida API: Module.findBaseAddress, Memory.scanSync, NativePointer.writeS32/writeS64
+        · 网络抓包
+          → 生成 Frida 脚本来 hook CFURLSession / NSURLSession / socket 层级
+          → 或使用 tcpdump 命令抓包
+        · 存档修改（本地 plist/json/binary 存档）
+          → 生成 shell/Python 脚本：读取沙盒容器文件 → 解析 → 修改 → 写回
+        · 二进制修改（Mach-O 静态修改）
+          → 使用 install_name_tool / insert_dylib / optool 等工具
+          → 或生成 Deb 包用于注入
+
+        【脚本生成规则】
+        1. 使用目标 App 的 Bundle ID / 进程名 / 可执行路径作为 attach 目标
+        2. Frida 脚本要包含错误捕获（try/catch）和日志输出
+        3. 内存搜索给出多种方案：精确值搜索 → 模糊搜索 → 指针链
+        4. 生成的脚本直接在聊天中展示，并标明执行命令
+
+        【Frida 脚本模板 - 内存修改】
+        ```javascript
+        // 附加到目标进程
+        Process.attach(module.base, {
+            onEnter: function(args) {
+                // hook 函数
+            },
+            onLeave: function(retval) {
+                retval.replace(9999); // 修改返回值
+            }
+        });
+        // 或搜索内存
+        var results = Memory.scanSync(module.base, module.size, "金币数值的16进制");
+        results[0].writeS32(9999);
+        ```
+
+        【Frida 脚本模板 - 网络抓包】
+        ```javascript
+        Interceptor.attach(Module.findExportByName("CFNetwork", "__CFURLConnectionSendSynchronousRequest"), {
+            onEnter: function(args) {
+                var req = new ObjC.Object(args[0]);
+                console.log("URL: " + req.URL().absoluteString());
+            }
+        });
+        ```
+
+        【输出格式】
+        回复中先简要说明修改原理，然后给出可直接执行的脚本和命令。
+        示例：
+        ```
+        🎯 原理：通过 Frida hook 进程，搜索金币变量地址并修改为目标值。
+
+        ── frida 脚本 ──
+        <脚本内容>
+
+        ── 执行命令 ──
+        su root -c 'frida -n 游戏进程名 -l script.js'
+        ```
+
         重要规则：
         - 修改类操作（write_file / git_commit）需要用户开启「允许修改」。如果执行结果提示未开启权限，请停止调用工具，直接告知用户需要先开启「允许修改」。
         - 不要反复调用同一个工具或反复重试失败的操作。如果一次工具调用未能达到目的，请基于已有信息给出回答，或询问用户，而不是继续循环调用。
