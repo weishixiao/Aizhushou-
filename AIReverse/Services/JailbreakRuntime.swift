@@ -83,17 +83,29 @@ final class JailbreakRuntime {
             "/Applications/Zebra.app",
             "/Applications/Installer.app",
             "/var/jb",                     // rootless (palera1n / Dopamine / RootHide)
+            "/var/jb/usr/bin/su",          // rootless su（最常见特征）
+            "/var/jb/bin/su",
             "/usr/libexec/cydia",
             "/usr/lib/substrate",
             "/usr/lib/libsubstrate.dylib",
+            "/usr/lib/libellekit.dylib",   // ElleKit (rootless)
+            "/var/jb/usr/lib/libellekit.dylib",
             "/private/var/lib/apt",
             "/var/lib/apt",
             "/.installed_unc0ver",
             "/.bootstrapped_electra",
-            "/binpack",
+            "/.palera1n_rootless",         // palera1n rootless
             "/var/binpack",
             "/var/lib/cydia",
             "/var/stash",
+            "/usr/bin/cycript",
+            "/usr/bin/ssh",               // OpenSSH 安装
+            "/usr/bin/frida-server",      // Frida
+            "/usr/sbin/frida-server",
+            "/var/checkra1n.dmg",         // checkra1n
+            "/var/checkra1n",             // Dopamine 使用 checkra1n 内核
+            "/Library/MobileSubstrate/MobileSubstrate.dylib",  // Substrate
+            "/var/jb/Library/MobileSubstrate/MobileSubstrate.dylib",  // rootless
         ]
         for path in indicators where pathAccessable(path, mode: F_OK) {
             return true

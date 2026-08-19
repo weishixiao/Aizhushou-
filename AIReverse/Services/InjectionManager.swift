@@ -12,15 +12,15 @@ enum InjectionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notJailbroken:
-            return "未检测到越狱环境"
+            return "未检测到越狱环境\n\n请确认设备已越狱。如确认已越狱但检测失败，可在注入页面开启「强制越狱模式」开关后重试。"
         case .dylibNotFound(let path):
-            return "dylib 文件不存在: \(path)"
+            return "dylib 文件不存在: \(path)\n\n请检查上传的文件是否完整。"
         case .targetNotFound(let path):
-            return "目标路径不存在: \(path)"
+            return "目标应用路径不存在: \(path)\n\n请确认目标应用已安装且未被卸载。"
         case .failed(let msg):
             return "注入失败：\(msg)"
         case .noRootAccess(let detail):
-            return "无 root 权限\n\(detail)\n\n请在 NewTerm 中执行:\n1. su root\n2. export DYLD_INSERT_LIBRARIES=/var/jb/usr/lib/ellekit/ellekit.dylib\n3. /var/mobile/root_service\n\n或配置 LaunchDaemon 守护进程以 root 身份运行"
+            return "无法获取 root 权限\n\n\(detail)\n\n解决方案：\n1. 在 NewTerm 中执行 su 切换到 root（默认密码 alpine）\n2. 确认 /var/jb/bin/su 存在且密码为 alpine\n3. 或启动 RootService（需 root_service 以 root 运行）"
         }
     }
 }
@@ -77,18 +77,26 @@ final class InjectionManager: ObservableObject {
 
         // 尝试 1：su 提权（Procursus 的 su 通常允许密码免）
         let escaped = command.replacingOccurrences(of: "'", with: "'\\''")
-        let suPaths = ["/var/jb/opt/procursus/bin/su", "/bin/su", "su"]
+        let suPaths = [
+            "/var/jb/bin/su",               // rootless (palera1n/Dopamine)
+            "/var/jb/usr/bin/su",           // rootless 备选
+            "/var/jb/opt/procursus/bin/su",  // Procursus
+            "/usr/bin/su",                  // 传统越狱
+            "/bin/su",                      // 传统越狱备选
+        ]
         for suPath in suPaths {
             var exists = false
             suPath.withCString { ptr in exists = access(ptr, F_OK) == 0 }
             guard exists else { continue }
 
             let suCmd = "\(suPath) root -c '\(escaped)'"
-            let (code, out) = rt.executeCommand(suCmd, environment: environment)
-            if code == 0 {
-                return (code, out)
+            // 超时保护：su 若需密码会阻塞等待 stdin，5 秒无响应则跳过
+            let result = executeWithTimeout(command: suCmd, environment: environment, timeoutSeconds: 5)
+            if result.0 == 0 {
+                return result
             }
-            // su 失败（密码错误等），继续尝试下一个路径
+            RuntimeLogger.shared.warning("注入", "su 路径 \(suPath) 失败（可能需密码或超时），继续尝试…")
+            // su 失败（密码错误/超时），继续尝试下一个路径
         }
 
         // 尝试 2：RootService socket（CMD_SHELL 转发）
@@ -102,6 +110,26 @@ final class InjectionManager: ObservableObject {
             let errMsg = error.localizedDescription
             return (-1, "无法获取 root 权限\nsu 提权失败，RootService 不可用: \(errMsg)")
         }
+    }
+
+    /// 带超时的命令执行（防止 su 密码提示阻塞）
+    private func executeWithTimeout(command: String,
+                                     environment: [String: String],
+                                     timeoutSeconds: UInt64) -> (Int32, String) {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: (Int32, String) = (-1, "超时")
+        let workTask = Task.detached {
+            let r = self.rt.executeCommand(command, environment: environment)
+            result = r
+            semaphore.signal()
+        }
+        let timeout = DispatchTime.now() + .seconds(Int(timeoutSeconds))
+        if semaphore.wait(timeout: timeout) == .timedOut {
+            workTask.cancel()
+            RuntimeLogger.shared.warning("注入", "命令执行超过 \(timeoutSeconds)s，已取消: \(command.prefix(40))…")
+            return (-1, "命令执行超时（\(timeoutSeconds) 秒，可能需输入密码）")
+        }
+        return result
     }
 
     @discardableResult
