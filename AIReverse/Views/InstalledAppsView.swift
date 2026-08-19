@@ -224,6 +224,7 @@ struct InjectPluginSheet: View {
     @State private var forceJailbreak = false
     @State private var rootPassword = ""
     @State private var diagnosticResult: String?
+    @State private var showNoSuAlert = false
 
     /// 越狱类型，注入时直接映射为硬编码路径，避免字符串被截断
     @State private var jailbreakType: JBType = .rootless
@@ -381,6 +382,14 @@ struct InjectPluginSheet: View {
                 importDylib(url)
             }
         }
+        .alert("缺少 su 二进制", isPresented: $showNoSuAlert) {
+            Button("复制安装命令") {
+                UIPasteboard.general.string = "apt update && apt install sudo"
+            }
+            Button("关闭", role: .cancel) {}
+        } message: {
+            Text("未检测到 su/sudo，无法提权到 root。\n\n请在 Sileo 中安装 Sudo 包，或在 NewTerm 中执行：\n\napt update && apt install sudo")
+        }
     }
 
     /// 插件注入允许的文件类型：deb 插件包 / dylib 动态库
@@ -518,6 +527,10 @@ struct InjectPluginSheet: View {
             let result = InjectionManager.shared.diagnoseRootAccess()
             DispatchQueue.main.async {
                 diagnosticResult = result
+                // 检查是否缺少 su（通过正则匹配诊断输出）
+                if result.contains("❌ 未找到 su 二进制") {
+                    showNoSuAlert = true
+                }
             }
         }
     }

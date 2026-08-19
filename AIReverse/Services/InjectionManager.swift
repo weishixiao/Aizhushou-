@@ -134,6 +134,32 @@ final class InjectionManager: ObservableObject {
             }
         }
 
+        // 尝试 1c：sudo 回退（Dopamine 某些环境 sudo 可用但 su 不存在）
+        let sudoPaths = ["sudo", "/var/jb/usr/bin/sudo", "/var/jb/bin/sudo"]
+        for sudoPath in sudoPaths {
+            var exists = false
+            if sudoPath.hasPrefix("/") {
+                sudoPath.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+            } else {
+                // 通过 which 探测
+                let (code, _) = executeWithTimeout(command: "which \(sudoPath)", environment: environment, timeoutSeconds: 2)
+                exists = (code == 0)
+            }
+            guard exists else { continue }
+            let sudoVariants = [
+                "\(sudoPath) -n '\(escaped)'",
+                "\(sudoPath) -u root -s /bin/sh -c '\(escaped)'",
+                "\(sudoPath) sh -c '\(escaped)'",
+            ]
+            for variant in sudoVariants {
+                let result = executeWithTimeout(command: variant, environment: environment, timeoutSeconds: 5)
+                if result.0 == 0 {
+                    RuntimeLogger.shared.info("注入", "sudo 提权成功: \(sudoPath)")
+                    return result
+                }
+            }
+        }
+
         // 尝试 2：尝试静默启动 RootService，再走 socket
         tryStartRootServiceIfNeeded()
 
@@ -159,20 +185,33 @@ final class InjectionManager: ObservableObject {
         lines.append("isJailbroken: \(rt.isJailbroken)")
         lines.append("currentUID: \(rt.currentUID)")
 
-        // su 路径探测
+        // su 路径探测（列出全部结果）
         let suPaths = [
             "/var/jb/bin/su", "/var/jb/usr/bin/su",
             "/var/jb/opt/procursus/bin/su", "/var/jb/opt/bin/su",
             "/usr/bin/su", "/bin/su",
         ]
+        var anySu = false
         for path in suPaths {
             var exists = false
             path.withCString { ptr in exists = access(ptr, F_OK) == 0 }
             if exists {
+                anySu = true
                 let (code, out) = executeWithTimeout(command: "\(path) -c 'whoami'", environment: ["PATH": jbPath], timeoutSeconds: 3)
-                lines.append("\(path): exists, code=\(code), out=\(out.trimmingCharacters(in: .whitespacesAndNewlines))")
+                lines.append("\(path): ✓ code=\(code) out=\(out.trimmingCharacters(in: .whitespacesAndNewlines))")
+            } else {
+                lines.append("\(path): ✗")
             }
         }
+        if !anySu {
+            lines.append("")
+            lines.append("❌ 未找到 su 二进制")
+            lines.append("请在 Sileo 中安装 Sudo 包 或执行: apt update && apt install sudo")
+        }
+
+        // sudo 探测
+        let (sudoCode, sudoOut) = executeWithTimeout(command: "sudo -n -u root -s /bin/sh -c 'whoami' 2>&1; echo EXIT\(?\)", environment: ["PATH": jbPath], timeoutSeconds: 4)
+        lines.append("sudo: code=\(sudoCode) out=\(sudoOut.trimmingCharacters(in: .whitespacesAndNewlines))")
 
         // RootService 探测
         let rsc = RootServiceClient.shared
