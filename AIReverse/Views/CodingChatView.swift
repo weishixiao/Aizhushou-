@@ -60,6 +60,16 @@ struct CodingChatView: View {
         .preferredColorScheme(.dark)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showWorkspaceView = true
+                } label: {
+                    Image(systemName: "folder.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(accent)
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                // 快速切换模型
                 Menu {
                     ForEach(modelStore.models) { model in
                         Button {
@@ -79,25 +89,16 @@ struct CodingChatView: View {
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "sparkles")
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(modelStore.selectedModel?.name ?? "选择模型")
-                            .font(.system(size: 14, weight: .medium))
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(modelStore.selectedModel?.name ?? "模型")
+                            .font(.system(size: 13, weight: .medium))
                             .lineLimit(1)
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 9, weight: .semibold))
                     }
                     .foregroundColor(accent)
                 }
                 .disabled(modelStore.models.isEmpty)
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    showWorkspaceView = true
-                } label: {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(accent)
-                }
             }
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
