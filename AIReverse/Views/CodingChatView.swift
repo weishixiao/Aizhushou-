@@ -52,6 +52,7 @@ struct CodingChatView: View {
             statusBar
             messageList
             uploadStatusBar
+            quickActionsBar
             inputBar
         }
         .background(background.ignoresSafeArea())
@@ -376,6 +377,53 @@ struct CodingChatView: View {
                 .background(surface)
             }
         }
+    }
+
+    // MARK: - 底部三功能键（应用 / 相册 / 进程）— CatPaw 暗色适配
+
+    private var quickActionsBar: some View {
+        HStack(spacing: 0) {
+            quickActionButton(
+                title: "应用",
+                icon: "app.badge.fill",
+                enabled: !agent.isWorking
+            ) { showAppsSheet = true }
+            quickActionButton(
+                title: "相册",
+                icon: "photo.on.rectangle.angled",
+                enabled: !agent.isWorking
+            ) { showPhotoPicker = true }
+            quickActionButton(
+                title: "进程",
+                icon: "cpu",
+                enabled: !agent.isWorking
+            ) { showProcessSheet = true }
+        }
+        .padding(.vertical, 6)
+        .background(background)
+        .overlay(
+            Rectangle()
+                .fill(surfaceElevated)
+                .frame(height: 0.5),
+            alignment: .top
+        )
+    }
+
+    private func quickActionButton(title: String, icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(enabled ? accent : textSecondary.opacity(0.4))
+                Text(title)
+                    .font(.caption2)
+                    .foregroundColor(enabled ? textSecondary : textSecondary.opacity(0.4))
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
     }
 
     // MARK: - Actions
