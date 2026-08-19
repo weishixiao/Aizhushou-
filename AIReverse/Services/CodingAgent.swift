@@ -193,11 +193,16 @@ final class CodingAgent: ObservableObject {
 
         do {
             var finalText: String?
+            var didShowAnalysisStage = false
             toolLoop: for _ in 0..<maxToolIterations {
                 if isCancelled { break }
 
-                await MainActor.run {
-                    updateStage("分析任务上下文", model: model, prompt: userText)
+                // 仅在首次发起 LLM 请求时展示「分析任务上下文」，后续工具循环阶段直接走工具执行提示
+                if !didShowAnalysisStage {
+                    await MainActor.run {
+                        updateStage("分析任务上下文", model: model, prompt: userText)
+                    }
+                    didShowAnalysisStage = true
                 }
                 let reply = try await chatWithRetry(
                     model: model,
@@ -333,13 +338,28 @@ final class CodingAgent: ObservableObject {
         }
     }
 
+    // 过渡性阶段文本；属于 UI 顶部状态栏展示，不写入历史消息
+    // 工具执行类阶段（执行工具：X / 工具执行完成：X）才写入历史，帮助用户回溯
+    private let transientStages: Set<String> = [
+        "分析任务上下文",
+        "准备发送请求",
+        "整理回复内容",
+        "请求失败",
+        "恢复上次任务",
+        "后台执行超时",
+        "任务已暂停"
+    ]
+
     @MainActor
     private func updateStage(_ text: String, model: AIModelConfig, prompt: String) {
         stageText = text
         if stageHistory.last != text {
             stageHistory.append(text)
-            messages.append(ChatMessage(role: .assistant, content: text, isProgress: true))
-            saveConversation()
+            // 过渡性阶段仅更新顶部状态栏，不写入历史消息（避免「分析任务上下文」在反复工具调用时大量重复）
+            if !transientStages.contains(text) {
+                messages.append(ChatMessage(role: .assistant, content: text, isProgress: true))
+                saveConversation()
+            }
         }
         pendingModelID = model.id
         pendingPrompt = prompt
@@ -458,7 +478,10 @@ final class CodingAgent: ObservableObject {
               let records = try? JSONDecoder().decode([StoredChatMessage].self, from: data) else {
             return
         }
-        messages = records.map { ChatMessage(role: $0.role, content: $0.content, date: $0.date, isProgress: $0.isProgress) }
+        // 恢复时丢弃旧的 isProgress 过渡消息（已改为不持久化），仅保留有意义的工具卡片
+        messages = records
+            .filter { !$0.isProgress }
+            .map { ChatMessage(role: $0.role, content: $0.content, date: $0.date) }
     }
 
     private func restorePendingTask() {
@@ -476,8 +499,9 @@ final class CodingAgent: ObservableObject {
 
     private func saveConversation() {
         guard let url = conversationURL() else { return }
+        // 持久化时排除 progress 过渡消息（仅执行工具类卡片保留，方便回溯）
         let records = messages
-            .filter { $0.role == .user || $0.role == .assistant }
+            .filter { $0.role == .user || ($0.role == .assistant && !$0.isProgress) || $0.role == .tool }
             .map { StoredChatMessage(role: $0.role, content: $0.content, date: $0.date, isProgress: $0.isProgress) }
         guard let data = try? JSONEncoder().encode(records) else { return }
         try? data.write(to: url, options: .atomic)

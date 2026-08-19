@@ -31,6 +31,7 @@ final class LLMClient {
         case network(Error)
         case badStatus(Int, String)
         case rateLimited
+        case serverOverloaded
         case emptyResponse
         case streamingUnsupported
 
@@ -45,7 +46,9 @@ final class LLMClient {
             case .badStatus(let code, let msg):
                 return "服务器返回 \(code): \(msg)"
             case .rateLimited:
-                return "请求过于频繁，已触发服务的速率限制（429），请稍等片刻后重试"
+                return "请求过于频繁，已触发速率限制（429），请稍等片刻后重试"
+            case .serverOverloaded:
+                return "服务端过载（overloaded），正在自动重试，请稍候…"
             case .emptyResponse:
                 return "模型未返回内容"
             case .streamingUnsupported:
@@ -55,23 +58,32 @@ final class LLMClient {
     }
 
     private let session: URLSession
+    /// 历史消息总 token 估算上限（字符数折算：1 token ≈ 4 ASCII 字符或 1.5 CJK 字符）
+    private let maxContextCharacters = 90_000
+    /// 单条工具结果最大字符
+    private let maxToolResultChars = 8_000
+    /// 重试配置
+    private let maxRetryCount = 3
+    private let baseRetryDelay: UInt64 = 2_000_000_000   // 2 秒
 
     init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 180
         config.timeoutIntervalForResource = 600
         config.waitsForConnectivity = true
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
         session = URLSession(configuration: config)
     }
 
     /// 发送一次聊天请求（支持 tools），按 API 类型路由到对应协议
     func chat(model: AIModelConfig, messages: [ChatMessage], tools: [[String: Any]]? = nil) async throws -> LLMReply {
         guard model.isFilled else { throw LLMError.emptyConfig }
+        let trimmed = truncateHistory(messages)
         switch model.apiType {
         case .openAI:
-            return try await openAIChat(model: model, messages: messages, tools: tools)
+            return try await openAIChat(model: model, messages: trimmed, tools: tools)
         case .anthropic:
-            return try await anthropicChat(model: model, messages: messages, tools: tools)
+            return try await anthropicChat(model: model, messages: trimmed, tools: tools)
         }
     }
 
@@ -91,7 +103,7 @@ final class LLMClient {
             body["tools"] = tools
         }
 
-        let data = try await post(endpoint: endpoint, body: body, model: model)
+        let data = try await postWithRetry(endpoint: endpoint, body: body, model: model)
 
         // 解析响应
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -137,10 +149,22 @@ final class LLMClient {
         let endpoint = try endpointURL(model, apiType: .anthropic)
         let body = try anthropicRequestBody(model: model, messages: messages, tools: tools)
 
-        let data = try await post(endpoint: endpoint, body: body, model: model)
+        let data = try await postWithRetry(endpoint: endpoint, body: body, model: model)
 
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let contentBlocks = json["content"] as? [[String: Any]] else {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw LLMError.emptyResponse
+        }
+        // 检查 Anthropic 错误体
+        if let error = json["error"] as? [String: Any],
+           let type = error["type"] as? String {
+            if type == "overloaded_error" {
+                throw LLMError.serverOverloaded
+            }
+            let msg = error["message"] as? String ?? type
+            throw LLMError.badStatus(500, msg)
+        }
+
+        guard let contentBlocks = json["content"] as? [[String: Any]] else {
             throw LLMError.emptyResponse
         }
 
@@ -178,19 +202,22 @@ final class LLMClient {
             "max_tokens": model.maxTokens > 0 ? model.maxTokens : 4096
         ]
 
-        // 收集 system 提示
+        // Anthropic 支持结构化 system blocks（可加 cache_control 提升缓存命中率）
         let systemTexts = messages
             .filter { $0.role == .system }
             .map { $0.content }
             .filter { !$0.isEmpty }
         if !systemTexts.isEmpty {
-            body["system"] = systemTexts.joined(separator: "\n\n")
+            let joined = systemTexts.joined(separator: "\n\n")
+            body["system"] = [
+                ["type": "text", "text": joined, "cache_control": ["type": "ephemeral"]]
+            ]
         }
 
         // 转换 messages：Anthropic 无 system role，tool 消息合并到 user
         body["messages"] = anthropicMessages(messages)
 
-        // 转换工具定义：OpenAI {type,function:{name,description,parameters}} -> {name, description, input_schema}
+        // 转换工具定义
         if let tools, !tools.isEmpty {
             let converted: [[String: Any]] = tools.compactMap { tool in
                 guard let fn = tool["function"] as? [String: Any],
@@ -202,7 +229,11 @@ final class LLMClient {
                 ]
             }
             if !converted.isEmpty {
-                body["tools"] = converted
+                // 最后一个 tool 加 cache_control（工具定义一般不变）
+                var finalTools = converted
+                let lastIdx = finalTools.count - 1
+                finalTools[lastIdx]["cache_control"] = ["type": "ephemeral"]
+                body["tools"] = finalTools
             }
         }
         return body
@@ -367,11 +398,12 @@ final class LLMClient {
     /// 发送带工具结果的下一轮请求
     func chat(model: AIModelConfig, messages: [ChatMessage]) async throws -> String {
         guard model.isFilled else { throw LLMError.emptyConfig }
+        let trimmed = truncateHistory(messages)
         switch model.apiType {
         case .openAI:
-            return try await openAISimpleChat(model: model, messages: messages)
+            return try await openAISimpleChat(model: model, messages: trimmed)
         case .anthropic:
-            return try await anthropicSimpleChat(model: model, messages: messages)
+            return try await anthropicSimpleChat(model: model, messages: trimmed)
         }
     }
 
@@ -385,7 +417,7 @@ final class LLMClient {
         if model.maxTokens > 0 {
             body["max_tokens"] = model.maxTokens
         }
-        let data = try await post(endpoint: endpoint, body: body, model: model)
+        let data = try await postWithRetry(endpoint: endpoint, body: body, model: model)
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = json["choices"] as? [[String: Any]],
               let first = choices.first,
@@ -399,9 +431,16 @@ final class LLMClient {
     private func anthropicSimpleChat(model: AIModelConfig, messages: [ChatMessage]) async throws -> String {
         let endpoint = try endpointURL(model, apiType: .anthropic)
         let body = try anthropicRequestBody(model: model, messages: messages)
-        let data = try await post(endpoint: endpoint, body: body, model: model)
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let contentBlocks = json["content"] as? [[String: Any]] else {
+        let data = try await postWithRetry(endpoint: endpoint, body: body, model: model)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw LLMError.emptyResponse
+        }
+        if let error = json["error"] as? [String: Any],
+           let type = error["type"] as? String {
+            if type == "overloaded_error" { throw LLMError.serverOverloaded }
+            throw LLMError.badStatus(500, error["message"] as? String ?? type)
+        }
+        guard let contentBlocks = json["content"] as? [[String: Any]] else {
             throw LLMError.emptyResponse
         }
         let texts = contentBlocks.compactMap { $0["text"] as? String }
@@ -487,10 +526,82 @@ final class LLMClient {
             if http.statusCode == 429 {
                 throw LLMError.rateLimited
             }
+            if http.statusCode == 529 {
+                throw LLMError.serverOverloaded
+            }
             let msg = String(data: data, encoding: .utf8) ?? ""
             throw LLMError.badStatus(http.statusCode, String(msg.prefix(500)))
         }
         return data
+    }
+
+    /// 带智能退避重试的 POST：429/529/503 自动重试
+    private func postWithRetry(endpoint: URL, body: [String: Any], model: AIModelConfig) async throws -> Data {
+        var lastError: Error = LLMError.emptyResponse
+        for attempt in 0..<maxRetryCount {
+            do {
+                return try await post(endpoint: endpoint, body: body, model: model)
+            } catch let error as LLMError {
+                lastError = error
+                switch error {
+                case .rateLimited, .serverOverloaded:
+                    let delay = baseRetryDelay * UInt64(1 << attempt)
+                    let delayMs = delay / 1_000_000
+                    RuntimeLogger.shared.warning("LLM", "遇到可重试错误 (\(error))，第 \(attempt + 1) 次等待 \(delayMs)ms 后重试")
+                    try? await Task.sleep(nanoseconds: delay)
+                case .badStatus(let code, _) where code >= 500:
+                    let delay = baseRetryDelay * UInt64(1 << attempt)
+                    try? await Task.sleep(nanoseconds: delay)
+                default:
+                    throw error
+                }
+            } catch {
+                lastError = error
+                if attempt < maxRetryCount - 1 {
+                    let delay = baseRetryDelay * UInt64(1 << attempt)
+                    try? await Task.sleep(nanoseconds: delay)
+                }
+            }
+        }
+        throw lastError
+    }
+
+    /// 截断历史消息至上下文窗口限制内
+    /// 策略：保留 system 消息 + 最近消息，超长 tool 结果截断
+    private func truncateHistory(_ messages: [ChatMessage]) -> [ChatMessage] {
+        // 1. 先截单条过长的 tool 内容
+        var processed = messages.map { msg -> ChatMessage in
+            guard msg.role == .tool && msg.content.count > maxToolResultChars else { return msg }
+            var trimmed = msg
+            trimmed.content = String(msg.content.prefix(maxToolResultChars))
+                + "\n…[截断，原始 \(msg.content.count) 字符]"
+            return trimmed
+        }
+
+        // 2. 估算总字符，若超限则裁剪中段（保留 system + 头部少量 + 尾部大量）
+        let totalChars = processed.reduce(0) { $0 + $1.content.count }
+        if totalChars <= maxContextCharacters { return processed }
+
+        // system 消息必须保留
+        let systemMsgs = processed.filter { $0.role == .system }
+        var nonSystem = processed.filter { $0.role != .system }
+
+        // 从旧消息开始丢弃，保留最近 N 条可用窗口
+        // 可用字符 = 上限 - system 占用
+        let systemChars = systemMsgs.reduce(0) { $0 + $1.content.count }
+        var budget = maxContextCharacters - systemChars
+
+        // 从末尾往前累加，直到超过 budget
+        var keepFromEnd: [ChatMessage] = []
+        for msg in nonSystem.reversed() {
+            let c = msg.content.count
+            if budget - c < 0, !keepFromEnd.isEmpty { break }
+            keepFromEnd.insert(msg, at: 0)
+            budget -= c
+        }
+
+        // 拼接：system + 保留的非 system
+        return systemMsgs + keepFromEnd
     }
 
     private func openAIMessageDict(_ message: ChatMessage) -> [String: Any] {

@@ -2,8 +2,14 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// MonkeyCode 工作台风格的单聊编程助手界面：
-/// 顶部模型信息条 + 文档式消息流 + 圆角输入区
+/// CatPaw 风格编程助手聊天界面
+///
+/// 视觉设计：
+/// - 深色主题（#1C1C1E 类 dark mode）
+/// - 气泡式对话（右侧用户消息 / 左侧 AI 文本）
+/// - 工具调用以内联执行卡片形式呈现
+/// - 顶部状态栏以细点 + 文字展示当前阶段
+/// - 底部胶囊式浮动输入框
 struct CodingChatView: View {
     @EnvironmentObject var modelStore: ModelStore
     @Environment(\.scenePhase) private var scenePhase
@@ -18,14 +24,23 @@ struct CodingChatView: View {
     @State private var uploadError: String?
     @State private var sendTask: Task<Void, Never>?
 
-    // 底部三功能键状态
-    @State private var showAppsSheet = false            // 「应用」：注入插件
-    @State private var showProcessSheet = false         // 「进程」：发往 AI 破解
-    @State private var targetApp: InstalledApp?          // 「进程」选中的目标应用（停留在聊天界面）
-    @State private var showPhotoPicker = false          // 「相册」：调取本机相册
+    @State private var showAppsSheet = false
+    @State private var showProcessSheet = false
+    @State private var targetApp: InstalledApp?
+    @State private var showPhotoPicker = false
     @State private var hasPhotoAttachment = false
 
-    private let accent = Color(red: 0.10, green: 0.62, blue: 0.42)
+    // MARK: - 视觉常量
+
+    /// accent: CatPaw 绿 (调和自旧版 MonkeyCode 绿，适配深色背景更亮)
+    private let accent = Color(red: 0.36, green: 0.80, blue: 0.48)
+    private let background = Color(red: 0.10, green: 0.10, blue: 0.11)      // #1A1A1C
+    private let surface = Color(red: 0.15, green: 0.15, blue: 0.16)          // #262629
+    private let surfaceElevated = Color(red: 0.20, green: 0.20, blue: 0.22)
+    private let userBubble = Color(red: 0.25, green: 0.55, blue: 0.35)       // 暗色绿
+    private let textPrimary = Color(white: 0.96)
+    private let textSecondary = Color(white: 0.62)
+    private let cardBorder = Color(white: 0.18)
     private let packageExtensions: Set<String> = ["ipa", "tipa", "deb", "dylib", "apk"]
 
     init(workspace: WorkspaceManager) {
@@ -34,15 +49,14 @@ struct CodingChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            statusBar
             messageList
             uploadStatusBar
-            modelSwitcher
-            targetAppBar
             inputBar
-            quickActionsBar
         }
-        .background(backgroundColor.ignoresSafeArea())
+        .background(background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
+        .preferredColorScheme(.dark)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
@@ -53,7 +67,6 @@ struct CodingChatView: View {
                         .foregroundColor(accent)
                 }
             }
-
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
                     showWorkspaceView = true
@@ -63,23 +76,23 @@ struct CodingChatView: View {
                         .foregroundColor(accent)
                 }
             }
-
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
-                    Text(navigationProgressTitle)
+                    Text(navigationTitle)
                         .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(textPrimary)
                         .lineLimit(1)
-                    Text(navigationProgressSubtitle)
+                    Text(navigationSubtitle)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(textSecondary)
                         .lineLimit(1)
-                    }
+                }
             }
         }
         .sheet(isPresented: $showModelSettings) {
             NavigationView {
                 SettingsHubView(agent: agent)
+                    .preferredColorScheme(.dark)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("完成") { showModelSettings = false }
@@ -90,6 +103,7 @@ struct CodingChatView: View {
         .sheet(isPresented: $showWorkspaceView) {
             NavigationView {
                 LocalWorkspaceView(workspace: agent.workspace)
+                    .preferredColorScheme(.dark)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("完成") { showWorkspaceView = false }
@@ -102,64 +116,215 @@ struct CodingChatView: View {
                 importPackageFile(url)
             })
         }
-        // 「相册」：调取本机相册
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(maxSelection: 1) { images in
                 handlePhotoPicked(images)
             }
         }
-        // 「应用」：选择应用注入插件
         .sheet(isPresented: $showAppsSheet) {
             NavigationView {
                 InstalledAppsView(intent: .injectPlugin)
+                    .preferredColorScheme(.dark)
             }
         }
-        // 「进程」：选择应用发往 AI 破解
         .sheet(isPresented: $showProcessSheet) {
             NavigationView {
                 InstalledAppsView(intent: .addressToAI) { app in
-                    DispatchQueue.main.async {
-                        selectTargetApp(app)
+                    DispatchQueue.main.async { selectTargetApp(app) }
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
+        .onAppear {
+            if agent.messages.isEmpty { seedWelcome() }
+        }
+        .onChange(of: scenePhase) { _ in
+            // 暂留逻辑原样保留
+        }
+    }
+
+    // MARK: - 顶部状态栏：CatPaw 风格 — 细点 + 当前阶段文字
+
+    @ViewBuilder
+    private var statusBar: some View {
+        if agent.isWorking {
+            HStack(spacing: 8) {
+                // 脉冲圆点
+                PulseDot(color: accent)
+                Text(agent.stageText ?? "处理中")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(textSecondary)
+                    .lineLimit(1)
+                    .animation(.easeInOut(duration: 0.2), value: agent.stageText)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(surface.overlay(accent.opacity(0.05)))
+        }
+    }
+
+    // MARK: - 消息列表
+
+    private var messageList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(Array(agent.messages.enumerated()), id: \.element.id) { index, msg in
+                        BubbleMessageRow(
+                            message: msg,
+                            showAvatar: shouldShowAvatar(for: msg, at: index)
+                        )
+                        .id(msg.id)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+            }
+            .onChange(of: agent.messages.count) { _ in
+                withAnimation(.easeOut(duration: 0.25)) {
+                    if let last = agent.messages.last {
+                        proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
         }
-        .onAppear {
-            if agent.messages.isEmpty {
-                seedWelcome()
-            }
-        }
-        .onChange(of: scenePhase) { newPhase in
-            if newPhase == .active, agent.pendingTask != nil, !agent.isWorking {
-                // 保持恢复提示可见，等待用户点按继续
-            }
-        }
     }
 
-    private var backgroundColor: Color {
-        Color(red: 0.98, green: 0.97, blue: 0.95)
+    /// 判断是否显示气泡头像（连续同角色消息只首条显示）
+    private func shouldShowAvatar(for msg: ChatMessage, at index: Int) -> Bool {
+        guard index > 0 else { return true }
+        let prev = agent.messages[index - 1]
+        return prev.role != msg.role
+    }
+
+    // MARK: - 输入区
+
+    private var inputBar: some View {
+        HStack(alignment: .bottom, spacing: 10) {
+            // 浮动胶囊输入框
+            capsuleInputField
+
+            // 发送 / 停止按钮
+            actionButton
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(background)
+        .overlay(
+            Rectangle()
+                .fill(surfaceElevated)
+                .frame(height: 0.5),
+            alignment: .top
+        )
+    }
+
+    private var capsuleInputField: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            // 附件按钮
+            Button {
+                showUploadPicker = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(textSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 8)
+            }
+            .buttonStyle(.plain)
+
+            // 输入框
+            if #available(iOS 16.0, *) {
+                TextField("发送消息…", text: $inputText, axis: .vertical)
+                    .font(.system(size: 15))
+                    .foregroundColor(textPrimary)
+                    .padding(.vertical, 10)
+            } else {
+                TextField("发送消息…", text: $inputText)
+                    .font(.system(size: 15))
+                    .foregroundColor(textPrimary)
+                    .padding(.vertical, 10)
+            }
+
+            // 进程/附件信息徽标
+            if targetApp != nil {
+                targetAppBadge
+            }
+        }
+        .padding(.horizontal, 14)
+        .background(surfaceElevated)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(inputText.isEmpty ? cardBorder : accent.opacity(0.4), lineWidth: 1)
+        )
+    }
+
+    private var targetAppBadge: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "app.fill")
+                .font(.system(size: 10))
+            Text(targetApp?.displayName ?? "")
+                .font(.caption2)
+                .lineLimit(1)
+        }
+        .foregroundColor(accent)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(accent.opacity(0.12))
+        .clipShape(Capsule())
+        .padding(.bottom, 6)
+    }
+
+    private var actionButton: some View {
+        Button {
+            if agent.isWorking {
+                stopConversation()
+            } else if canResumeFromInputButton {
+                resumePendingTask()
+            } else {
+                sendInput()
+            }
+        } label: {
+            Image(systemName: inputButtonIcon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(inputButtonDisabled ? textSecondary.opacity(0.4) : .white)
+                .frame(width: 38, height: 38)
+                .background(
+                    Circle()
+                        .fill(inputButtonEnabled ? accent : surfaceElevated)
+                )
+        }
+        .buttonStyle(.plain)
+        .disabled(inputButtonDisabled)
+    }
+
+    private var inputButtonEnabled: Bool {
+        if agent.isWorking { return true }
+        if canResumeFromInputButton { return true }
+        return !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var inputButtonDisabled: Bool {
+        !inputButtonEnabled
     }
 
     // MARK: - 状态信息
 
-    private var navigationProgressTitle: String {
+    private var navigationTitle: String {
         if agent.isWorking {
             return agent.stageText ?? "处理中"
         }
-        if let task = currentTaskTitle {
-            return task
-        }
-        return "等待输入"
+        if let task = currentTaskTitle { return task }
+        return "AIReverse"
     }
 
-    private var navigationProgressSubtitle: String {
-        if agent.isWorking {
-            return "当前任务进行中"
+    private var navigationSubtitle: String {
+        if agent.isWorking { return "执行中…" }
+        if modelStore.selectedModel != nil {
+            return modelStore.selectedModel!.name
         }
-        if agent.messages.contains(where: { $0.role == .user }) {
-            return "上次对话已恢复"
-        }
-        return "发送消息或上传文件开始任务"
+        return "选择模型以开始"
     }
 
     private var currentTaskTitle: String? {
@@ -180,22 +345,21 @@ struct CodingChatView: View {
                         .foregroundColor(accent)
                     Text("已上传：\(name)")
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(textSecondary)
                         .lineLimit(1)
                     Spacer()
                     Button {
                         removeUploadedFile()
                     } label: {
-                        Label("删除", systemImage: "xmark.circle.fill")
-                            .labelStyle(.titleAndIcon)
+                        Image(systemName: "xmark")
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(textSecondary)
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 14)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                .background(Color.white)
+                .background(surface)
             } else if let error = uploadError {
                 HStack(spacing: 8) {
                     Image(systemName: "exclamationmark.triangle")
@@ -203,317 +367,15 @@ struct CodingChatView: View {
                         .foregroundColor(.orange)
                     Text(error)
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(textSecondary)
                         .lineLimit(2)
                     Spacer()
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-                .background(Color.white)
-            }
-        }
-    }
-
-    // MARK: - 文档式消息流
-
-    private var messageList: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    ForEach(agent.messages) { msg in
-                        DocumentMessageRow(message: msg)
-                            .id(msg.id)
-                    }
-                }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-            }
-            .onChange(of: agent.messages.count) { _ in
-                withAnimation {
-                    if let last = agent.messages.last {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
+                .padding(.vertical, 6)
+                .background(surface)
             }
         }
-    }
-
-    // MARK: - 输入区
-
-    private var modelSwitcher: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(accent)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("当前模型")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                Text(selectedModelTitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            if modelStore.models.isEmpty {
-                Button {
-                    showModelSettings = true
-                } label: {
-                    Label("添加模型", systemImage: "plus.circle")
-                        .font(.caption)
-                        .foregroundColor(accent)
-                }
-                .buttonStyle(.plain)
-            } else {
-                Menu {
-                    ForEach(modelStore.models) { model in
-                        Button {
-                            modelStore.select(model.id)
-                        } label: {
-                            Label(model.name, systemImage: modelStore.selectedModel?.id == model.id ? "checkmark.circle.fill" : "circle")
-                        }
-                    }
-
-                    Button {
-                        showModelSettings = true
-                    } label: {
-                        Label("管理模型", systemImage: "slider.horizontal.3")
-                    }
-                } label: {
-                    Label("切换", systemImage: "chevron.up.chevron.down")
-                        .font(.caption)
-                        .foregroundColor(agent.isWorking ? .secondary : accent)
-                }
-                .disabled(agent.isWorking)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(backgroundColor)
-        .overlay(
-            Rectangle()
-                .fill(Color.black.opacity(0.05))
-                .frame(height: 1),
-            alignment: .top
-        )
-    }
-
-    private var selectedModelTitle: String {
-        guard let model = modelStore.selectedModel else { return "未配置模型" }
-        return "\(model.name) · \(model.modelID)"
-    }
-
-    private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            // 输入框（胶囊形白底）
-            HStack(alignment: .bottom, spacing: 0) {
-                Button {
-                    showUploadPicker = true
-                } label: {
-                    Image(systemName: "paperclip")
-                        .font(.system(size: 16))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 10)
-                }
-                .buttonStyle(.plain)
-
-                if #available(iOS 16.0, *) {
-                    TextField("发送消息，或上传 ipa / tipa / deb / dylib / apk...", text: $inputText, axis: .vertical)
-                        .font(.system(size: 15))
-                        .padding(.vertical, 10)
-                } else {
-                    TextField("发送消息，或上传 ipa / tipa / deb / dylib / apk...", text: $inputText)
-                        .font(.system(size: 15))
-                        .padding(.vertical, 10)
-                }
-
-                Button {
-                    // 语音输入占位
-                } label: {
-                    Image(systemName: "mic.fill")
-                        .font(.system(size: 16))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 10)
-                        .padding(.bottom, 10)
-                }
-                .buttonStyle(.plain)
-            }
-            .background(Color.white)
-            .cornerRadius(20)
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
-            )
-
-            Button {
-                if agent.isWorking {
-                    stopConversation()
-                } else if canResumeFromInputButton {
-                    resumePendingTask()
-                } else {
-                    sendInput()
-                }
-            } label: {
-                Image(systemName: inputButtonIcon)
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(width: 40, height: 40)
-                    .background(sendButtonColor)
-                    .clipShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .disabled(inputButtonDisabled)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(backgroundColor)
-        .overlay(
-            Rectangle()
-                .fill(Color.black.opacity(0.05))
-                .frame(height: 1),
-            alignment: .top
-        )
-    }
-
-    // MARK: - 目标应用条（进程功能选中后停留在聊天界面）
-
-    @ViewBuilder
-    private var targetAppBar: some View {
-        if let targetApp {
-            HStack(spacing: 8) {
-                if let icon = targetApp.icon {
-                    Image(uiImage: icon)
-                        .resizable()
-                        .frame(width: 22, height: 22)
-                        .cornerRadius(5)
-                } else {
-                    Image(systemName: "app.fill")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("目标：\(targetApp.displayName)")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                    Text(targetApp.bundleID)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Button {
-                    clearTargetApp()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 5)
-            .background(accent.opacity(0.1))
-            .overlay(
-                Rectangle()
-                    .fill(Color.black.opacity(0.04))
-                    .frame(height: 1),
-                alignment: .bottom
-            )
-        }
-    }
-
-    // MARK: - 底部三功能键（应用 / 相册 / 进程）
-
-    private var quickActionsBar: some View {
-        HStack(spacing: 0) {
-            quickActionButton(
-                title: "应用",
-                icon: "app.badge.fill",
-                action: { showAppsSheet = true }
-            )
-            quickActionButton(
-                title: "相册",
-                icon: "photo.on.rectangle.angled",
-                action: { showPhotoPicker = true }
-            )
-            quickActionButton(
-                title: "进程",
-                icon: "cpu",
-                action: { showProcessSheet = true }
-            )
-        }
-        .padding(.vertical, 7)
-        .background(backgroundColor)
-        .overlay(
-            Rectangle()
-                .fill(Color.black.opacity(0.05))
-                .frame(height: 1),
-            alignment: .top
-        )
-    }
-
-    private func quickActionButton(title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(accent)
-                Text(title)
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(agent.isWorking)
-    }
-
-    /// 「相册」选择到图片后的处理：保存到沙盒并注入会话上下文
-    private func handlePhotoPicked(_ images: [UIImage]) {
-        guard let first = images.first else { return }
-        hasPhotoAttachment = true
-        if let data = first.jpegData(compressionQuality: 0.8) {
-            let hash = String(format: "%06d", Int(Date().timeIntervalSince1970) % 1000000)
-            let fileName = "photo_\(hash).jpg"
-            if let url = savePhotoData(data, name: fileName) {
-                guard let dim = ImageDimension.from(data: data) else { return }
-                agent.appendLocalMessage(
-                    role: .user,
-                    content: "已从相册添加图片：\(fileName)（尺寸 \(dim.width)x\(dim.height)）"
-                )
-                agent.appendLocalMessage(role: .assistant, content: "已接收图片，你可以告诉我需要对这张图片做什么，例如 OCR 识别、构图分析等。")
-            }
-        }
-    }
-
-    private func savePhotoData(_ data: Data, name: String) -> URL? {
-        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
-        let uploads = docs.appendingPathComponent("Uploads", isDirectory: true)
-        try? FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true)
-        let url = uploads.appendingPathComponent(name)
-        try? data.write(to: url)
-        return url
-    }
-
-    /// 「进程」选中应用后：设置为当前分析目标（停留在聊天界面，由用户发指令）
-    private func selectTargetApp(_ app: InstalledApp) {
-        showProcessSheet = false
-        targetApp = app
-        agent.appendLocalMessage(
-            role: .assistant,
-            content: "已选中目标应用：**\(app.displayName)**（\(app.bundleID)）\n现在可以发送指令给它（例如：分析它的加载逻辑、生成去除广告的插件、修改某个存档等）。"
-        )
-    }
-
-    /// 关闭当前目标应用选择
-    private func clearTargetApp() {
-        targetApp = nil
     }
 
     // MARK: - Actions
@@ -529,12 +391,6 @@ struct CodingChatView: View {
         if agent.isWorking { return "stop.fill" }
         if canResumeFromInputButton { return "arrow.clockwise" }
         return "arrow.up"
-    }
-
-    private var inputButtonDisabled: Bool {
-        if agent.isWorking { return false }
-        if canResumeFromInputButton { return false }
-        return inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var canResumeFromInputButton: Bool {
@@ -562,7 +418,7 @@ struct CodingChatView: View {
 
     private func resumePendingTask() {
         guard let model = resumeTargetModel else {
-            agent.errorMessage = "请先在设置中配置并选择用于恢复的模型"
+            agent.errorMessage = "请先选择用于恢复的模型"
             return
         }
         sendTask = Task { @MainActor in
@@ -575,19 +431,17 @@ struct CodingChatView: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !agent.isWorking else { return }
         var prompt = trimmed
-        // 若已选中目标应用，把目标信息注入 AI 上下文（用户指令针对该应用执行）
         if let targetApp {
             prompt += """
 
             【当前目标应用】\(targetApp.displayName)（\(targetApp.bundleID)）
             路径：\(targetApp.bundlePath)
             版本：\(targetApp.version)
-            请针对上述目标应用执行我的指令（分析、生成插件、修改数据等）。
             """
         }
         sendTask = Task { @MainActor in
             guard let model = modelStore.selectedModel else {
-                agent.errorMessage = "请先在设置中添加并选择模型"
+                agent.errorMessage = "请先添加并选择模型"
                 return
             }
             await agent.send(prompt, model: model)
@@ -596,10 +450,10 @@ struct CodingChatView: View {
     }
 
     private func seedWelcome() {
-        let text = """
-        你好，我是 AIReverse。你可以直接发消息，也可以点击输入框左侧附件上传 ipa、tipa、deb、dylib 或 apk 文件。
-        """
-        agent.appendLocalMessage(role: .assistant, content: text)
+        agent.appendLocalMessage(
+            role: .assistant,
+            content: "你好，我是 **AIReverse**。🦖\n\n直接发消息开始，或点击左侧 ➕ 上传 ipa / tipa / deb / dylib / apk 文件进行分析。"
+        )
     }
 
     private func importPackageFile(_ url: URL) {
@@ -628,9 +482,7 @@ struct CodingChatView: View {
     }
 
     private func removeUploadedFile() {
-        if let url = uploadedFileURL {
-            try? FileManager.default.removeItem(at: url)
-        }
+        if let url = uploadedFileURL { try? FileManager.default.removeItem(at: url) }
         uploadedFileName = nil
         uploadedFileURL = nil
         uploadError = nil
@@ -644,7 +496,6 @@ struct CodingChatView: View {
         }
         let uploads = docs.appendingPathComponent("Uploads", isDirectory: true)
         try fileManager.createDirectory(at: uploads, withIntermediateDirectories: true)
-
         let timestamp = Int(Date().timeIntervalSince1970)
         let baseName = url.deletingPathExtension().lastPathComponent
         let safeName = baseName.isEmpty ? "package" : baseName
@@ -654,68 +505,81 @@ struct CodingChatView: View {
         try fileManager.copyItem(at: url, to: destination)
         return destination
     }
+
+    // MARK: - 相册
+
+    private func handlePhotoPicked(_ images: [UIImage]) {
+        guard let first = images.first else { return }
+        hasPhotoAttachment = true
+        if let data = first.jpegData(compressionQuality: 0.8) {
+            let hash = String(format: "%06d", Int(Date().timeIntervalSince1970) % 1000000)
+            let fileName = "photo_\(hash).jpg"
+            if let url = savePhotoData(data, name: fileName),
+               let dim = ImageDimension.from(data: data) {
+                agent.appendLocalMessage(
+                    role: .user,
+                    content: "已添加图片：\(fileName)（\(dim.width)x\(dim.height)）"
+                )
+                agent.appendLocalMessage(
+                    role: .assistant,
+                    content: "已收到图片，告诉我你需要对它做什么：OCR / 构图分析 / …"
+                )
+            }
+        }
+    }
+
+    private func savePhotoData(_ data: Data, name: String) -> URL? {
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return nil }
+        let uploads = docs.appendingPathComponent("Uploads", isDirectory: true)
+        try? FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true)
+        let url = uploads.appendingPathComponent(name)
+        try? data.write(to: url)
+        return url
+    }
+
+    // MARK: - 进程目标应用
+
+    private func selectTargetApp(_ app: InstalledApp) {
+        showProcessSheet = false
+        targetApp = app
+        agent.appendLocalMessage(
+            role: .assistant,
+            content: "已选中目标应用：**\(app.displayName)**（`\(app.bundleID)`）\n现在可以直接发送指令。"
+        )
+    }
 }
 
-/// 文档式消息行：AI 消息直接铺开渲染 Markdown，用户消息为绿色轻量卡片
-struct DocumentMessageRow: View {
-    let message: ChatMessage
+// MARK: - 气泡消息行
 
-    private let userBubble = Color(red: 0.85, green: 0.95, blue: 0.88) // 浅绿 用户气泡
-    private let toolIconBlock = Color(red: 0.94, green: 0.95, blue: 0.93) // 浅绿工具图标块 #F0F1EC
-    private let toolIconGreen = Color(red: 0.03, green: 0.56, blue: 0.31) // 绿色工具图标 #08904E
-    private let cardBorder = Color(red: 0.90, green: 0.91, blue: 0.89) // 卡片浅边框
+/// CatPaw 风格气泡：右侧用户消息半透明白底；
+/// AI 文本无背景直接渲染 Markdown；工具调用内联卡片
+private struct BubbleMessageRow: View {
+    let message: ChatMessage
+    let showAvatar: Bool
+
+    private let userBubble = Color(red: 0.22, green: 0.50, blue: 0.32)   // 深绿
+    private let surface = Color(red: 0.15, green: 0.15, blue: 0.16)
+    private let surfaceElevated = Color(red: 0.20, green: 0.20, blue: 0.22)
+    private let accent = Color(red: 0.36, green: 0.80, blue: 0.48)
+    private let textPrimary = Color(white: 0.96)
+    private let textSecondary = Color(white: 0.62)
+    private let textTime = Color(white: 0.45)
 
     var body: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 0) {
             if message.isProgress {
-                // 进度消息：紧凑灰色小字，不占用气泡位置
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(toolIconGreen)
-                        .frame(width: 5, height: 5)
-                    Text(message.content)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-            } else if message.role == .assistant {
-                // AI 消息：左对齐，白色卡片 + 浅灰边框
-                HStack {
-                    MarkdownView(content: message.content)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .leading)
-                        .background(Color.white)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(cardBorder, lineWidth: 1)
-                        )
-                        .cornerRadius(14)
-                    Spacer(minLength: 0)
-                }
+                progressRow
             } else if message.role == .user {
-                // 用户消息：右对齐，浅绿气泡
-                HStack {
-                    Spacer(minLength: 0)
-                    Text(message.content)
-                        .font(.system(size: 15))
-                        .foregroundColor(Color(red: 0.10, green: 0.10, blue: 0.12)) // 深色字体
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(userBubble)
-                        .cornerRadius(14)
-                        .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .trailing)
-                }
+                userBubbleRow
+            } else if message.role == .assistant {
+                aiTextRow
             } else if message.role == .tool {
-                toolCallRow
+                toolCallCard
             } else {
+                // system 或其他
                 Text(message.content)
                     .font(.caption2)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -727,77 +591,146 @@ struct DocumentMessageRow: View {
             Button { UIPasteboard.general.string = quotedContent } label: {
                 Label("复制为引用", systemImage: "quote.bubble")
             }
-            Button { UIPasteboard.general.string = formattedDate } label: {
-                Label("复制时间", systemImage: "clock")
-            }
         }
     }
 
-    /// 工具调用气泡：MonkeyCode 工作台风格
-    /// 左侧浅绿圆角图标块 + 右侧工具名标题与等宽内容
-    private var toolCallRow: some View {
-        HStack(alignment: .top, spacing: 0) {
-            // 左侧浅绿图标块
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(toolIconBlock)
-                    .frame(width: 56, height: 56)
-                Image(systemName: toolIconName)
-                    .font(.system(size: 22, weight: .medium))
-                    .foregroundColor(toolIconGreen)
-            }
-            .padding(.trailing, 12)
+    // MARK: 进度消息：CatPaw 风格 — 小灰字 + 左侧小绿点
 
-            // 右侧：标题 + 内容
-            VStack(alignment: .leading, spacing: 6) {
-                Text(toolTitle)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(Color(red: 0.11, green: 0.11, blue: 0.11))
-                Text(message.content)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(Color(red: 0.40, green: 0.40, blue: 0.38))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+    private var progressRow: some View {
+        HStack(spacing: 8) {
+            PulseDot(color: accent, size: 6)
+            Text(message.content)
+                .font(.system(size: 12.5))
+                .foregroundColor(textSecondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
             Spacer(minLength: 0)
         }
-        .padding(12)
-        .background(Color.white)
-        .cornerRadius(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 3)
     }
 
-    /// 根据工具名映射图标
-    private var toolIconName: String {
-        guard let name = message.name?.lowercased() else { return "wrench.and.screwdriver.fill" }
-        if name.contains("exec") || name.contains("command") || name.contains("shell") || name.contains("bash") {
-            return "terminal.fill"
+    // MARK: 用户消息：右侧胶囊气泡
+
+    private var userBubbleRow: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            Spacer(minLength: 0)
+            if showAvatar {
+                avatarSlot(role: .user)
+            } else {
+                Spacer().frame(width: 28)
+            }
+            Text(message.content)
+                .font(.system(size: 15))
+                .foregroundColor(.white)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    LinearGradient(
+                        colors: [userBubble, userBubble.opacity(0.85)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .clipShape(
+                    RoundedCorner(radius: 18, corners: [.topLeft, .topRight, .bottomLeft])
+                )
+                .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: .trailing)
         }
-        if name.contains("read") || name.contains("file") {
-            return "doc.text.fill"
-        }
-        if name.contains("search") || name.contains("find") || name.contains("grep") || name.contains("lookup") {
-            return "magnifyingglass"
-        }
-        if name.contains("write") || name.contains("edit") || name.contains("modify") {
-            return "pencil.and.outline"
-        }
-        if name.contains("git") || name.contains("repo") || name.contains("branch") || name.contains("commit") {
-            return "arrow.triangle.branch"
-        }
-        if name.contains("list_dir") || name.contains("ls") {
-            return "folder.fill"
-        }
-        if name.contains("app") || name.contains("install") {
-            return "apps.iphone"
-        }
-        if name.contains("list") {
-            return "list.bullet"
-        }
-        return "wrench.and.screwdriver.fill"
     }
 
-    /// 工具显示标题（去除下划线，转为中文友好名）
+    // MARK: AI 消息：左对齐纯文本 + Markdown
+
+    private var aiTextRow: some View {
+        HStack(alignment: .top, spacing: 8) {
+            if showAvatar {
+                avatarSlot(role: .assistant)
+            } else {
+                Spacer().frame(width: 28)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                MarkdownView(content: message.content)
+                    .foregroundColor(textPrimary)
+                if let name = message.name, !name.isEmpty {
+                    Text(name)
+                        .font(.caption2)
+                        .foregroundColor(textTime)
+                }
+            }
+            .frame(maxWidth: UIScreen.main.bounds.width * 0.78, alignment: .leading)
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: 工具调用卡片：暗色背景 + 左侧 accent 色条 + 状态点
+
+    private var toolCallCard: some View {
+        HStack(alignment: .top, spacing: 0) {
+            // accent 色条
+            Rectangle()
+                .fill(toolAccent)
+                .frame(width: 3)
+
+            VStack(alignment: .leading, spacing: 6) {
+                // 标题行：状态点 + 工具名 + 标题
+                HStack(spacing: 6) {
+                    PulseDot(color: toolAccent, size: 6)
+                    Text(toolTitle)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(textPrimary)
+                    Spacer()
+                    Text(message.name ?? "")
+                        .font(.caption2)
+                        .foregroundColor(textSecondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(surface)
+                        .clipShape(Capsule())
+                }
+                // 结果
+                if !message.content.isEmpty {
+                    Text(message.content)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundColor(textSecondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+        }
+        .background(surface)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color(white: 0.18), lineWidth: 0.5)
+        )
+        .padding(.leading, 36)  // 缩进对齐 AI 消息正文
+    }
+
+    private var toolAccent: Color {
+        if message.content.contains("失败") || message.content.contains("错误") {
+            return Color(red: 0.95, green: 0.45, blue: 0.45)
+        }
+        return accent
+    }
+
+    // MARK: 头像占位（连续同角色用空白占位保持对齐）
+
+    @ViewBuilder
+    private func avatarSlot(role: ChatMessage.Role) -> some View {
+        let size: CGFloat = 28
+        ZStack {
+            Circle()
+                .fill(role == .user ? accent.opacity(0.2) : surfaceElevated)
+                .frame(width: size, height: size)
+            Image(systemName: role == .user ? "person.fill" : "sparkles")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(role == .user ? accent : textSecondary)
+        }
+    }
+
+    // MARK: 工具名中文映射
+
     private var toolTitle: String {
         guard let name = message.name, !name.isEmpty else { return "工具调用" }
         let mapping: [String: String] = [
@@ -834,16 +767,47 @@ struct DocumentMessageRow: View {
             .map { "> \($0)" }
             .joined(separator: "\n")
     }
+}
 
-    private var formattedDate: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_Hans_CN")
-        formatter.dateFormat = "yyyy年M月d日 HH:mm:ss"
-        return formatter.string(from: message.date)
+// MARK: - 自定义形状：指定角圆角
+
+private struct RoundedCorner: Shape {
+    var radius: CGFloat = 0
+    var corners: UIRectCorner = .allCorners
+
+    func path(in rect: CGRect) -> Path {
+        let path = UIBezierPath(
+            roundedRect: rect,
+            byRoundingCorners: corners,
+            cornerRadii: CGSize(width: radius, height: radius)
+        )
+        return Path(path.cgPath)
     }
 }
 
-/// 从 JPEG/PNG 二进制读取图像尺寸的轻量辅助
+// MARK: - 脉冲圆点（指示正在执行）
+
+private struct PulseDot: View {
+    let color: Color
+    var size: CGFloat = 5
+    @State private var animating = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
+            .scaleEffect(animating ? 1.5 : 0.8)
+            .opacity(animating ? 0.4 : 1.0)
+            .animation(
+                Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true),
+                value: animating
+            )
+            .onAppear { animating = true }
+    }
+}
+
+// MARK: - 图像尺寸读取（保留）
+
 fileprivate struct ImageDimension: CustomStringConvertible {
     let width: Int
     let height: Int
@@ -851,7 +815,6 @@ fileprivate struct ImageDimension: CustomStringConvertible {
     var description: String { "\(width)x\(height)" }
 
     static func from(data: Data) -> ImageDimension? {
-        // 优先用 UIImage 取尺寸（最可靠）
         if let img = UIImage(data: data) {
             return ImageDimension(width: Int(img.size.width), height: Int(img.size.height))
         }
