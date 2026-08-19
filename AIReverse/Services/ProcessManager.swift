@@ -44,6 +44,106 @@ final class ProcessManager {
         }
     }
 
+    // MARK: - 脚本执行
+
+    /// 执行结果模型
+    struct ExecutionResult {
+        let success: Bool
+        let output: String
+        let exitCode: Int
+
+        var displayText: String {
+            let status = success ? "✅ 执行成功" : "❌ 执行失败 (exit=\(exitCode))"
+            return "\(status)\n\n\(output)"
+        }
+    }
+
+    /// 将 Frida 脚本保存到临时文件并执行
+    func executeFridaScript(target: String, script: String, timeout: TimeInterval = 30) -> ExecutionResult {
+        // 1. 保存脚本到临时文件
+        let scriptName = "frida_\(Int(Date().timeIntervalSince1970)).js"
+        let scriptPath = "/var/mobile/Library/\(scriptName)"
+
+        do {
+            try script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
+        } catch {
+            return ExecutionResult(success: false, output: "脚本写入失败: \(error.localizedDescription)", exitCode: -1)
+        }
+
+        // 2. 通过 RootService 执行
+        let rsc = RootServiceClient.shared
+        do {
+            try rsc.connect()
+            let result = try rsc.execFrida(target: target, scriptPath: scriptPath)
+            rsc.disconnect()
+
+            // 解析结果
+            let success = result.contains("EXIT 0")
+            let output = stripExitLine(result)
+            return ExecutionResult(success: success, output: output, exitCode: success ? 0 : 1)
+        } catch {
+            // RootService 不可用，尝试直接用 su + frida 执行
+            return executeFridaViaSu(target: target, scriptPath: scriptPath)
+        }
+    }
+
+    /// 通过 su + frida 直接执行（RootService 不可用时的回退）
+    private func executeFridaViaSu(target: String, scriptPath: String) -> ExecutionResult {
+        let fridaCmd = "su root -c '/var/jb/usr/local/bin/frida -n \(target) -l \(scriptPath) --no-pause 2>&1' | head -100"
+        let (code, output) = executeAsRoot(fridaCmd)
+        return ExecutionResult(success: code == 0, output: output, exitCode: code)
+    }
+
+    /// 保存并执行 shell 脚本（存档修改等）
+    func executeShellScript(_ script: String, timeout: TimeInterval = 10) -> ExecutionResult {
+        let scriptName = "shell_\(Int(Date().timeIntervalSince1970)).sh"
+        let scriptPath = "/var/mobile/Library/\(scriptName)"
+
+        do {
+            try script.write(toFile: scriptPath, atomically: true, encoding: .utf8)
+        } catch {
+            return ExecutionResult(success: false, output: "脚本写入失败: \(error.localizedDescription)", exitCode: -1)
+        }
+
+        let (code, output) = executeAsRoot("chmod +x \(scriptPath) && bash \(scriptPath) 2>&1")
+        return ExecutionResult(success: code == 0, output: output, exitCode: code)
+    }
+
+    /// 启动抓包
+    func startPacketCapture(interface: String = "en0", filter: String = "") -> ExecutionResult {
+        let rsc = RootServiceClient.shared
+        do {
+            try rsc.connect()
+            let result = try rsc.startPcap(interface: interface, filter: filter)
+            rsc.disconnect()
+            return ExecutionResult(success: true, output: result, exitCode: 0)
+        } catch {
+            // 回退到直接 sudo
+            let cmd = "nohup /usr/sbin/tcpdump -i \(interface) -w /var/mobile/Library/capture_\(Int(Date().timeIntervalSince1970)).pcap \(filter) > /var/mobile/Library/tcpdump.log 2>&1 &"
+            let (code, output) = executeAsRoot(cmd)
+            return ExecutionResult(success: code == 0, output: "tcpdump 已启动\n\(output)", exitCode: code)
+        }
+    }
+
+    /// 停止抓包
+    func stopPacketCapture() -> ExecutionResult {
+        let (code, output) = executeAsRoot("pkill -f tcpdump 2>/dev/null; echo done")
+        return ExecutionResult(success: code == 0, output: output, exitCode: code)
+    }
+
+    /// 读取存档文件
+    func readSaveFile(path: String) -> ExecutionResult {
+        let (code, output) = executeAsRoot("cat '\(path)' 2>&1 | head -500")
+        return ExecutionResult(success: code == 0, output: output, exitCode: code)
+    }
+
+    /// 写入存档文件
+    func writeSaveFile(path: String, content: Data) -> ExecutionResult {
+        let b64 = content.base64EncodedString()
+        let (code, output) = executeAsRoot("echo '\(b64)' | base64 -d > '\(path)' 2>&1 && echo OK")
+        return ExecutionResult(success: code == 0 && output.contains("OK"), output: output, exitCode: code)
+    }
+
     // MARK: - 运行环境检测
 
     /// 检查 Frida 是否可用
@@ -175,6 +275,16 @@ final class ProcessManager {
     /// 通过 root 执行命令
     private func executeAsRoot(_ command: String) -> (exitCode: Int, output: String) {
         return InjectionManager.shared.executeAsRoot(command)
+    }
+
+    /// 剥离 "EXIT <code>" 行
+    private func stripExitLine(_ reply: String) -> String {
+        guard let nl = reply.firstIndex(of: "\n") else { return reply }
+        let firstLine = String(reply[..<nl])
+        if firstLine.hasPrefix("EXIT ") {
+            return String(reply[reply.index(after: nl)...])
+        }
+        return reply
     }
 
     /// 检查进程名是否在运行

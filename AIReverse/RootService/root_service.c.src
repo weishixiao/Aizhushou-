@@ -182,6 +182,101 @@ void handle_client(int client_fd) {
         char *jb = exec_cmd("ls /var/jb 2>/dev/null | head -5", NULL);
         snprintf(reply, BUF_SIZE, "EXIT 0\n身份: %s\n%s\n/var/jb 内容:\n%s", id, euid, jb);
     }
+    else if (strcmp(buffer, "CMD_PROCESS_LIST") == 0) {
+        // 列出运行中的进程（PID + 命令名）
+        char *out = exec_cmd("ps -eo pid,comm 2>/dev/null | head -100", NULL);
+        snprintf(reply, BUF_SIZE, "EXIT 0\n%s", out);
+    }
+    else if (strncmp(buffer, "CMD_FRIDA_CHECK", 15) == 0) {
+        // 检查 frida-server 状态
+        char *ver = exec_cmd("/var/jb/usr/bin/frida-server --version 2>/dev/null || /usr/bin/frida-server --version 2>/dev/null || echo not_installed", NULL);
+        char *running = exec_cmd("pgrep -x frida-server 2>/dev/null && echo RUNNING || echo STOPPED", NULL);
+        snprintf(reply, BUF_SIZE, "EXIT 0\n版本: %s\n状态: %s", ver, running);
+    }
+    else if (strncmp(buffer, "CMD_FRIDA_START", 15) == 0) {
+        // 启动 frida-server（后台）
+        char *start = exec_cmd("nohup /var/jb/usr/bin/frida-server > /var/mobile/Library/frida.log 2>&1 & echo $!", NULL);
+        snprintf(reply, BUF_SIZE, "EXIT 0\nfrida-server 已启动 PID:%s", start);
+    }
+    else if (strncmp(buffer, "CMD_FRIDA_EXEC ", 15) == 0) {
+        // 执行 frida 脚本: CMD_FRIDA_EXEC <target> <script_path>
+        char *args = buffer + 15;
+        char target[256] = {0};
+        char script_path[512] = {0};
+        // 解析参数: target 和 script_path（空格分隔）
+        char *space = strchr(args, ' ');
+        if (space) {
+            *space = '\0';
+            strncpy(target, args, sizeof(target) - 1);
+            strncpy(script_path, space + 1, sizeof(script_path) - 1);
+        } else {
+            strncpy(target, args, sizeof(target) - 1);
+            script_path[0] = '\0';
+        }
+
+        char frida_cmd[1024];
+        if (script_path[0]) {
+            // 执行脚本文件
+            snprintf(frida_cmd, sizeof(frida_cmd),
+                "/var/jb/usr/local/bin/frida -n '%s' -l '%s' --no-pause 2>&1 | head -200",
+                target, script_path);
+        } else {
+            // 仅 attach 列出模块
+            snprintf(frida_cmd, sizeof(frida_cmd),
+                "/var/jb/usr/local/bin/frida -n '%s' --no-pause -e 'console.log(Process.enumerateModules().map(m=>m.name).join(\",\"))' 2>&1 | head -50",
+                target);
+        }
+        int code = 0;
+        char *out = exec_cmd(frida_cmd, &code);
+        snprintf(reply, BUF_SIZE, "EXIT %d\n%s", code, out);
+    }
+    else if (strncmp(buffer, "CMD_PCAP_START ", 15) == 0) {
+        // 启动抓包: CMD_PCAP_START <interface> <filter> <output_file>
+        // 例如: CMD_PCAP_START en0 port 443 /var/mobile/Library/capture.pcap
+        char *args = buffer + 15;
+        char pcap_cmd[1024];
+        snprintf(pcap_cmd, sizeof(pcap_cmd),
+            "nohup /usr/sbin/tcpdump -i %s -w /var/mobile/Library/capture_%ld.pcap > /var/mobile/Library/tcpdump.log 2>&1 & echo $!",
+            args, time(NULL));
+        char *pid = exec_cmd(pcap_cmd, NULL);
+        snprintf(reply, BUF_SIZE, "EXIT 0\ntcpdump 已启动 PID:%s\n输出: /var/mobile/Library/capture.pcap", pid);
+    }
+    else if (strcmp(buffer, "CMD_PCAP_STOP") == 0) {
+        // 停止抓包
+        char *out = exec_cmd("pkill -f 'tcpdump' 2>/dev/null; echo done", NULL);
+        snprintf(reply, BUF_SIZE, "EXIT 0\n抓包已停止\n%s", out);
+    }
+    else if (strncmp(buffer, "CMD_PCAP_LIST", 13) == 0) {
+        // 列出抓包文件
+        char *out = exec_cmd("ls -lh /var/mobile/Library/capture_*.pcap 2>/dev/null || echo 无抓包文件", NULL);
+        snprintf(reply, BUF_SIZE, "EXIT 0\n%s", out);
+    }
+    else if (strncmp(buffer, "CMD_FILE_READ ", 14) == 0) {
+        // 读取文件内容（用于存档修改）
+        char *path = buffer + 14;
+        char cat_cmd[1024];
+        snprintf(cat_cmd, sizeof(cat_cmd), "cat '%s' 2>&1 | head -500", path);
+        char *out = exec_cmd(cat_cmd, NULL);
+        snprintf(reply, BUF_SIZE, "EXIT 0\n%s", out);
+    }
+    else if (strncmp(buffer, "CMD_FILE_WRITE ", 15) == 0) {
+        // 写入文件（用于存档修改）
+        // 格式: CMD_FILE_WRITE <path> <base64_content>
+        char *args = buffer + 15;
+        char *space = strchr(args, ' ');
+        if (space) {
+            *space = '\0';
+            char *path = args;
+            char *b64 = space + 1;
+            char write_cmd[2048];
+            snprintf(write_cmd, sizeof(write_cmd),
+                "echo '%s' | base64 -d > '%s' 2>&1 && echo OK || echo FAIL", b64, path);
+            char *out = exec_cmd(write_cmd, NULL);
+            snprintf(reply, BUF_SIZE, "EXIT 0\n%s", out);
+        } else {
+            snprintf(reply, BUF_SIZE, "EXIT 1\n格式错误: CMD_FILE_WRITE <path> <base64>");
+        }
+    }
     else if (strncmp(buffer, "CMD_SHELL ", 10) == 0) {
         // 执行 shell 命令，带真实退出码
         char *cmd = buffer + 10;

@@ -142,6 +142,59 @@ final class RootServiceClient {
         return result
     }
 
+    // MARK: - 进程管理命令
+
+    /// 获取运行中进程列表
+    func listProcesses() throws -> String {
+        return try execute("CMD_PROCESS_LIST")
+    }
+
+    // MARK: - Frida 命令
+
+    /// 检查 Frida 状态
+    func checkFrida() throws -> String {
+        return try execute("CMD_FRIDA_CHECK")
+    }
+
+    /// 启动 frida-server
+    func startFrida() throws -> String {
+        return try execute("CMD_FRIDA_START")
+    }
+
+    /// 执行 Frida 脚本
+    func execFrida(target: String, scriptPath: String) throws -> String {
+        return try execute("CMD_FRIDA_EXEC \(target) \(scriptPath)")
+    }
+
+    // MARK: - 抓包命令
+
+    /// 启动抓包
+    func startPcap(interface: String, filter: String) throws -> String {
+        return try execute("CMD_PCAP_START \(interface) \(filter)")
+    }
+
+    /// 停止抓包
+    func stopPcap() throws -> String {
+        return try execute("CMD_PCAP_STOP")
+    }
+
+    /// 列出抓包文件
+    func listPcapFiles() throws -> String {
+        return try execute("CMD_PCAP_LIST")
+    }
+
+    // MARK: - 文件读写命令
+
+    /// 读取文件（用于存档修改）
+    func readFile(_ path: String) throws -> String {
+        return try execute("CMD_FILE_READ \(path)")
+    }
+
+    /// 写入文件（base64 编码内容）
+    func writeFile(_ path: String, base64Content: String) throws -> String {
+        return try execute("CMD_FILE_WRITE \(path) \(base64Content)")
+    }
+
     /// 新增：执行并返回结构化退出码（用于需要真实成败判断的新路径）
     @discardableResult
     func executeStructured(_ command: String) throws -> CommandResult {
