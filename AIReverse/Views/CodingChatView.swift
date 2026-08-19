@@ -61,44 +61,21 @@ struct CodingChatView: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
+                    showModelSettings = true
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(accent)
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
                     showWorkspaceView = true
                 } label: {
                     Image(systemName: "folder.fill")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(accent)
                 }
-            }
-            ToolbarItem(placement: .navigationBarTrailing) {
-                // 快速切换模型
-                Menu {
-                    ForEach(modelStore.models) { model in
-                        Button {
-                            modelStore.select(model.id)
-                        } label: {
-                            Label(
-                                model.name,
-                                systemImage: modelStore.selectedModel?.id == model.id ? "checkmark.circle.fill" : "circle"
-                            )
-                        }
-                    }
-                    Button {
-                        showModelSettings = true
-                    } label: {
-                        Label("管理模型", systemImage: "slider.horizontal.3")
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text(modelStore.selectedModel?.name ?? "模型")
-                            .font(.system(size: 13, weight: .medium))
-                            .lineLimit(1)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold))
-                    }
-                    .foregroundColor(accent)
-                }
-                .disabled(modelStore.models.isEmpty)
             }
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
