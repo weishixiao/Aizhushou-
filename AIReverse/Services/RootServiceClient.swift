@@ -72,7 +72,11 @@ final class RootServiceClient {
         guard ret == 0 else {
             close(sock)
             let error = RootServiceError.connectFailed(errno)
-            RuntimeLogger.shared.warning("RootService", error.localizedDescription)
+            RuntimeLogger.shared.warning("RootService", "\(error.localizedDescription)\nsocket路径: \(socketPath)")
+            // 附加提示信息
+            if errno == 2 {
+                RuntimeLogger.shared.warning("RootService", "提示：root_service 二进制可能未编译或未安装\n在 NewTerm 中执行: cd /path/to/root_service && bash build.sh")
+            }
             throw error
         }
         fd = sock
@@ -205,17 +209,30 @@ enum RootServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .socketCreateFailed(let e):
-            return "创建 Socket 失败 (errno=\(e))"
+            return "创建 Socket 失败 (\(errnoName(e)), errno=\(e))"
         case .connectFailed(let e):
-            return "无法连接 RootService，请先在 NewTerm 中启动服务\n(错误码: \(e))"
+            return "无法连接 RootService (\(errnoName(e)), errno=\(e))\nsocket: /var/mobile/Library/aireverse_service.sock\n请先在 NewTerm 中启动服务"
         case .notConnected:
             return "未连接 RootService"
         case .writeFailed(let e):
-            return "写入 Socket 失败 (errno=\(e))"
+            return "写入 Socket 失败 (\(errnoName(e)), errno=\(e))"
         case .readFailed(let e):
-            return "读取 Socket 返回失败 (errno=\(e))"
+            return "读取 Socket 返回失败 (\(errnoName(e)), errno=\(e))"
         case .authFailed:
             return "RootService 鉴权失败（共享密钥不匹配或服务端要求鉴权）"
+        }
+    }
+
+    /// 将 errno 转换为可读名称
+    private func errnoName(_ e: Int32) -> String {
+        switch e {
+        case 2:     return "ENOENT（服务未运行）"
+        case 111:   return "ECONNREFUSED（连接被拒绝）"
+        case 110:   return "ETIMEDOUT（连接超时）"
+        case 13:    return "EACCES（权限不足）"
+        case 1:     return "EPERM（操作不允许）"
+        case 11:    return "EAGAIN（资源暂不可用）"
+        default:    return "未知错误"
         }
     }
 }

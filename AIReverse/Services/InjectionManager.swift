@@ -151,12 +151,13 @@ final class InjectionManager: ObservableObject {
                 "\(sudoPath) -u root -s /bin/sh -c '\(escaped)'",
                 "\(sudoPath) sh -c '\(escaped)'",
             ]
-            for variant in sudoVariants {
+            for (idx, variant) in sudoVariants.enumerated() {
                 let result = executeWithTimeout(command: variant, environment: environment, timeoutSeconds: 5)
                 if result.0 == 0 {
-                    RuntimeLogger.shared.info("注入", "sudo 提权成功: \(sudoPath)")
+                    RuntimeLogger.shared.info("注入", "sudo 提权成功: \(sudoPath) (变体 \(idx+1))")
                     return result
                 }
+                RuntimeLogger.shared.warning("注入", "sudo 变体 \(idx+1) 失败: code=\(result.0) out=\(result.1.prefix(60))")
             }
         }
 
@@ -172,9 +173,18 @@ final class InjectionManager: ObservableObject {
             return (0, result)
         } catch {
             let errMsg = error.localizedDescription
-            let suHint = suTried == 0 ? "\n未检测到 su 文件（越狱可能未完整加载）" : "\n尝试了 \(suTried) 个 su 路径（含密码回退）均未成功"
+            let suHint = suTried == 0 ? "未检测到 su 文件" : "尝试了 \(suTried) 个 su 路径（含密码回退）均失败"
+            let sudoHint = "sudo 回退也未成功"
             let detail = suErrors.isEmpty ? "" : "\n调试: \(suErrors.prefix(3).joined(separator: "; "))"
-            return (-1, "无法获取 root 权限\nsu 提权失败，RootService 不可用: \(errMsg)\(suHint)\(detail)")
+            return (-1, """
+            无法获取 root 权限
+            原因: \(suHint)，\(sudoHint)，RootService: \(errMsg)
+            \(detail)
+            解决:
+            ① 在 NewTerm 执行: su root -c 'whoami'（密码 alpine/xiao）
+            ② 在 NewTerm 启动 RootService: nohup /usr/local/bin/root_service &
+            ③ 通过 App 内注入页面的「诊断权限」按钮检查
+            """)
         }
     }
 
@@ -223,23 +233,60 @@ final class InjectionManager: ObservableObject {
     /// 尝试启动 RootService 后台服务（当 socket 不可用时）
     private func tryStartRootServiceIfNeeded() {
         let candidates = [
-            "/var/mobile/root_service",
-            "/var/jb/usr/bin/root_service",
             "/var/jb/bin/root_service",
+            "/var/jb/usr/bin/root_service",
             "/usr/bin/root_service",
+            "/usr/local/bin/root_service",
         ]
+        var foundBin = false
         for path in candidates {
             var exists = false
             path.withCString { ptr in exists = access(ptr, F_OK) == 0 }
-            guard exists else { continue }
-            RuntimeLogger.shared.info("注入", "尝试启动 RootService: \(path)")
-            // 后台启动（nohup 方式，不等待结果）
-            let launchCmd = "nohup \(path) > /dev/null 2>&1 &"
-            _ = rt.executeCommand(launchCmd, environment: ["PATH": jbPath])
-            // 给服务 2 秒启动时间
-            Thread.sleep(forTimeInterval: 2.0)
-            break
+            if exists {
+                foundBin = true
+                RuntimeLogger.shared.info("注入", "RootService 二进制已存在: \(path)")
+                // 后台启动（nohup 方式，不等待结果）
+                let launchCmd = "nohup \(path) > /var/mobile/Library/root_service.log 2>&1 &"
+                let (code, output) = sudoExec(launchCmd)
+                if code == 0 {
+                    RuntimeLogger.shared.info("注入", "RootService 已尝试启动，等待初始化...")
+                } else {
+                    RuntimeLogger.shared.warning("注入", "RootService 启动命令返回 code=\(code) output=\(output.prefix(100))")
+                }
+                // 给服务 2 秒启动时间
+                Thread.sleep(forTimeInterval: 2.0)
+                // 验证是否启动成功
+                let rsc = RootServiceClient.shared
+                if rsc.isServiceRunning {
+                    RuntimeLogger.shared.info("注入", "RootService 启动成功")
+                } else {
+                    RuntimeLogger.shared.warning("注入", "RootService 启动后仍无法连接，请检查 /var/mobile/Library/root_service.log")
+                }
+                break
+            }
         }
+        if !foundBin {
+            RuntimeLogger.shared.warning("注入", "未找到 root_service 二进制（已搜索 \(candidates.count) 个路径）")
+        }
+    }
+
+    /// 用 sudo 执行启动命令（避免 nohup 在 sandbox 下被拦截）
+    private func sudoExec(_ command: String) -> (Int32, String) {
+        let sudoPaths = ["sudo", "/var/jb/usr/bin/sudo", "/var/jb/bin/sudo"]
+        for sudoPath in sudoPaths {
+            var exists = false
+            if sudoPath.hasPrefix("/") {
+                sudoPath.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+            } else {
+                let (code, _) = executeWithTimeout(command: "which \(sudoPath)", environment: ["PATH": jbPath], timeoutSeconds: 2)
+                exists = (code == 0)
+            }
+            guard exists else { continue }
+            let fullCmd = "\(sudoPath) sh -c '\(command.replacingOccurrences(of: "'", with: "'\\''"))'"
+            return executeWithTimeout(command: fullCmd, environment: ["PATH": jbPath], timeoutSeconds: 5)
+        }
+        // 无 sudo 时直接执行
+        return rt.executeCommand(command, environment: ["PATH": jbPath])
     }
 
     /// 带超时的命令执行（防止 su 密码提示阻塞）
@@ -404,11 +451,13 @@ final class InjectionManager: ObservableObject {
     /// 注入前 root 预检：在动手改文件前确保 root 提权可用
     private func preflightRootAccess() throws {
         let probe = "echo aireverse_root_ok"
+        RuntimeLogger.shared.info("注入", "开始 root 预检...")
         let (code, out) = runAsRoot(probe, environment: ["PATH": jbPath])
         if code != 0 {
-            throw InjectionError.noRootAccess("需要 root 权限才能修改 App bundle，但当前无法提权。\n请检查 su 路径或启动 RootService。")
+            RuntimeLogger.shared.error("注入", "root 预检失败 (exit=\(code)): \(out.prefix(200))")
+            throw InjectionError.noRootAccess(out.isEmpty ? "提权命令无输出（可能被沙盒拦截）" : out)
         }
-        RuntimeLogger.shared.info("注入", "root 预检通过: \(out.trimmingCharacters(in: .whitespacesAndNewlines))")
+        RuntimeLogger.shared.info("注入", "root 预检通过 ✓")
     }
 
     private func doInject(
