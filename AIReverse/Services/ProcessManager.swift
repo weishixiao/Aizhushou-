@@ -206,7 +206,7 @@ final class ProcessManager {
     /// 通过 root 权限执行 ps 命令获取
     func listProcesses(includeSystem: Bool = false) -> [ProcessInfo] {
         // 使用 ps 获取进程列表，带 bundle ID
-        let psCmd = "ps -eo pid,comm 2>/dev/null | awk 'NR>1{print \$1,\$2}'"
+        let psCmd = "ps -eo pid,comm 2>/dev/null | awk 'NR>1{print \\$1,\\$2}'"
         let (code, output) = executeAsRoot(psCmd)
         guard code == 0 else {
             RuntimeLogger.shared.warning("ProcessManager", "ps 命令失败 (exit=\(code))")
@@ -289,26 +289,25 @@ final class ProcessManager {
 
     /// 检查进程名是否在运行
     private func isProcessRunning(name: String) -> Bool {
-        let (code, output) = executeAsRoot("pgrep -x \(name) 2>/dev/null && echo RUNNING", timeout: 5)
+        let (_, output) = executeAsRoot("pgrep -x \(name) 2>/dev/null && echo RUNNING")
         return output.contains("RUNNING")
     }
 
     /// 获取 PID 对应的 Bundle ID
     private func bundleIDForPID(_ pid: Int) -> String {
-        // 通过 NSXPC 或读取 /proc/pid/info 不太直接，使用 lsof 或 footprint
-        let (_, output) = executeAsRoot("ps -p \(pid) -o command= 2>/dev/null | grep -oE 'com\\.[a-zA-Z0-9.]+' | head -1", timeout: 5)
+        let (_, output) = executeAsRoot("ps -p \(pid) -o command= 2>/dev/null | grep -oE 'com\\.[a-zA-Z0-9.]+' | head -1")
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 获取进程的可执行文件路径
     private func processPathForPID(_ pid: Int) -> String {
-        let (_, output) = executeAsRoot("ps -p \(pid) -o command= 2>/dev/null | awk '{print \$1}'", timeout: 5)
+        let (_, output) = executeAsRoot("ps -p \(pid) -o command= 2>/dev/null | awk '{print \\$1}'")
         return output.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// 通过 Bundle ID 查找 PID
     private func pidsForBundleID(_ bundleID: String) -> [Int] {
-        let (_, output) = executeAsRoot("pgrep -f '\(bundleID)' 2>/dev/null || true", timeout: 5)
+        let (_, output) = executeAsRoot("pgrep -f '\(bundleID)' 2>/dev/null || true")
         return output.components(separatedBy: .newlines).compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
     }
 
@@ -317,21 +316,23 @@ final class ProcessManager {
         let infoPlistPath = "\(app.bundlePath)/Info.plist"
         let (_, output) = executeAsRoot(
             "/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' '\(infoPlistPath)' 2>/dev/null || " +
-            "plutil -extract CFBundleExecutable raw '\(infoPlistPath)' 2>/dev/null",
-            timeout: 5
+            "plutil -extract CFBundleExecutable raw '\(infoPlistPath)' 2>/dev/null"
         )
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    /// 获取 App 的沙盒容器路径（通过 mobile_container_manager 或 footprint）
+    /// 获取 App 的沙盒容器路径（通过遍历 + grep bundleID）
     private func containerPath(forApp app: InstalledApp) -> String? {
-        let (_, output) = executeAsRoot(
-            "ls -d /var/mobile/Containers/Data/Application/* 2>/dev/null | while read d; do " +
-            "if [ -f \"\$d/..\$Info.plist\" ] && grep -q \"\(app.bundleID)\" \"\$d/..\$Info.plist\" 2>/dev/null; then " +
-            "echo \"\$d\"; break; fi; done",
-            timeout: 5
-        )
+        let cmd = """
+        ls -d /var/mobile/Containers/Data/Application/* 2>/dev/null | while read d; do
+            plist="$d/../Info.plist"
+            if [ -f "$plist" ] && grep -q "\(app.bundleID)" "$plist" 2>/dev/null; then
+                echo "$d"; break
+            fi
+        done
+        """
+        let (_, output) = executeAsRoot(cmd)
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
