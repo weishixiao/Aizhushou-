@@ -92,7 +92,9 @@ final class ProcessRunner {
         close(outPipe.readEnd)
         close(errPipe.readEnd)
 
-        let exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1
+        // WIFEXITED/WEXITSTATUS 是 C 宏，Swift 中不可用，手工解析 waitpid 返回的 status
+        // 正常退出: (status & 0x7f) == 0；退出码: (status >> 8) & 0xff
+        let exitCode = ((status & 0x7f) == 0) ? Int((status >> 8) & 0xff) : -1
         let stdout = String(data: outData, encoding: .utf8) ?? ""
         let stderr = String(data: errData, encoding: .utf8) ?? ""
         return Result(exitCode: Int(exitCode), stdout: stdout, stderr: stderr)
