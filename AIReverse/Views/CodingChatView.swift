@@ -816,6 +816,17 @@ private struct BubbleMessageRow: View {
             "llm_call": "模型调用",
             "github_pull": "拉取仓库",
             "github_push": "推送仓库",
+            "frida_execute": "Frida 脚本执行",
+            "frida_check": "Frida 状态检查",
+            "frida_start": "Frida 服务启动",
+            "pcap_start": "启动抓包",
+            "pcap_stop": "停止抓包",
+            "pcap_list": "抓包文件",
+            "shell_script": "Shell 脚本执行",
+            "modify_save": "修改游戏存档",
+            "read_file_plist": "读取存档文件",
+            "process_list": "进程列表",
+            "memory_scan": "内存扫描",
         ]
         if let mapped = mapping[name] { return mapped }
         return name.replacingOccurrences(of: "_", with: " ").capitalized
