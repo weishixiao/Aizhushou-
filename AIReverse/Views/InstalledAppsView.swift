@@ -20,33 +20,11 @@ struct InstalledAppsView: View {
         NavigationView {
             VStack(spacing: 0) {
                 if isLoading {
-                    Spacer()
-                    ProgressView("加载应用列表…")
-                        .tint(.green)
-                    Spacer()
+                    loadingView
                 } else if apps.isEmpty {
-                    Spacer()
-                    VStack(spacing: 12) {
-                        Image(systemName: "app.dashed")
-                            .font(.system(size: 48))
-                            .foregroundColor(.secondary)
-                        Text("未找到用户应用")
-                            .font(.headline)
-                        Text("当前设备可能没有安装用户应用，或沙盒受限")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding()
-                    Spacer()
+                    emptyView
                 } else {
-                    List {
-                        ForEach(filteredApps) { app in
-                            appRow(app)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .searchable(text: $searchText, prompt: "搜索应用…")
+                    appListView
                 }
             }
             .navigationTitle("选择目标应用")
@@ -62,6 +40,54 @@ struct InstalledAppsView: View {
         }
     }
 
+    // MARK: - 加载视图
+
+    private var loadingView: some View {
+        VStack(spacing: 16) {
+            Spacer()
+            ProgressView()
+                .scaleEffect(1.2)
+                .tint(.green)
+            Text("加载应用列表…")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+    }
+
+    // MARK: - 空状态视图
+
+    private var emptyView: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            Image(systemName: "app.dashed")
+                .font(.system(size: 48))
+                .foregroundColor(.secondary)
+            Text("未找到用户应用")
+                .font(.headline)
+            Text("当前设备可能没有安装用户应用，或沙盒受限")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            Spacer()
+        }
+        .padding()
+    }
+
+    // MARK: - 应用列表视图
+
+    private var appListView: some View {
+        List {
+            ForEach(filteredApps) { app in
+                appRow(app)
+            }
+        }
+        .listStyle(.plain)
+        .searchable(text: $searchText, prompt: "搜索应用…")
+    }
+
+    // MARK: - 应用行
+
     private func appRow(_ app: InstalledApp) -> some View {
         Button {
             onSelect(app)
@@ -69,24 +95,14 @@ struct InstalledAppsView: View {
         } label: {
             HStack(spacing: 12) {
                 // 应用图标
-                Group {
-                    if let data = app.iconData, let uiImage = UIImage(data: data) {
-                        Image(uiImage: uiImage)
-                            .resizable()
-                    } else {
-                        Image(systemName: "app.fill")
-                            .font(.system(size: 24))
-                            .foregroundColor(.green)
-                    }
-                }
-                .frame(width: 40, height: 40)
-                .background(Color(white: 0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                appIcon(for: app)
 
+                // 应用信息
                 VStack(alignment: .leading, spacing: 2) {
                     Text(app.displayName)
                         .font(.system(size: 15, weight: .medium))
                         .foregroundColor(.primary)
+                        .lineLimit(1)
                     Text(app.bundleID)
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -108,6 +124,44 @@ struct InstalledAppsView: View {
         }
         .buttonStyle(.plain)
     }
+
+    // MARK: - 应用图标视图
+
+    @ViewBuilder
+    private func appIcon(for app: InstalledApp) -> some View {
+        Group {
+            if let data = app.iconData, let uiImage = UIImage(data: data) {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                // 占位图标：显示应用名称首字母
+                placeholderIcon(for: app)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .background(Color(white: 0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// 生成占位图标（显示首字母）
+    @ViewBuilder
+    private func placeholderIcon(for app: InstalledApp) -> some View {
+        let initial = app.displayName.first?.uppercased() ?? "?"
+        ZStack {
+            // 渐变背景
+            LinearGradient(
+                colors: [Color.green.opacity(0.6), Color.green.opacity(0.3)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            Text(initial)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+        }
+    }
+
+    // MARK: - 加载数据
 
     private func loadApps() {
         Task {

@@ -143,12 +143,10 @@ struct CodingChatView: View {
             })
         }
         .sheet(isPresented: $showProcessSheet) {
-            NavigationView {
-                InstalledAppsView { app in
-                    selectTargetApp(app)
-                }
-                .preferredColorScheme(.dark)
+            InstalledAppsView { app in
+                selectTargetApp(app)
             }
+            .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(maxSelection: 1) { images in
@@ -279,9 +277,25 @@ struct CodingChatView: View {
     // MARK: - 目标进程徽标（带删除按钮）
 
     private var targetAppBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "app.fill")
-                .font(.system(size: 10))
+        HStack(spacing: 6) {
+            // 应用小图标
+            Group {
+                if let data = targetApp?.iconData, let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    // 首字母占位
+                    let initial = targetApp?.displayName.first?.uppercased() ?? "?"
+                    Text(initial)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+            }
+            .frame(width: 18, height: 18)
+            .background(Color.green.opacity(0.5))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+
             Text(targetApp?.displayName ?? "")
                 .font(.caption2)
                 .lineLimit(1)
