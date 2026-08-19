@@ -81,25 +81,38 @@ final class InjectionManager: ObservableObject {
             "/var/jb/bin/su",               // rootless (palera1n/Dopamine)
             "/var/jb/usr/bin/su",           // rootless 备选
             "/var/jb/opt/procursus/bin/su",  // Procursus
+            "/var/jb/opt/bin/su",           // Procursus alt
             "/usr/bin/su",                  // 传统越狱
             "/bin/su",                      // 传统越狱备选
         ]
+        var suTried = 0
         for suPath in suPaths {
             var exists = false
             suPath.withCString { ptr in exists = access(ptr, F_OK) == 0 }
             guard exists else { continue }
+            suTried += 1
 
-            let suCmd = "\(suPath) root -c '\(escaped)'"
-            // 超时保护：su 若需密码会阻塞等待 stdin，5 秒无响应则跳过
-            let result = executeWithTimeout(command: suCmd, environment: environment, timeoutSeconds: 5)
-            if result.0 == 0 {
-                return result
+            // 多种 su 调用语法
+            let variants = [
+                "\(suPath) root -c '\(escaped)'",
+                "\(suPath) -c '\(escaped)'",   // 有些 su 不需要用户名
+            ]
+            for variant in variants {
+                let result = executeWithTimeout(command: variant, environment: environment, timeoutSeconds: 4)
+                if result.0 == 0 {
+                    return result
+                }
             }
             RuntimeLogger.shared.warning("注入", "su 路径 \(suPath) 失败（可能需密码或超时），继续尝试…")
-            // su 失败（密码错误/超时），继续尝试下一个路径
+        }
+        if suTried == 0 {
+            RuntimeLogger.shared.warning("注入", "未找到任何 su 二进制文件（已搜索 \(suPaths.count) 个路径）")
         }
 
-        // 尝试 2：RootService socket（CMD_SHELL 转发）
+        // 尝试 2：尝试静默启动 RootService，再走 socket
+        tryStartRootServiceIfNeeded()
+
+        // 尝试 3：RootService socket（CMD_SHELL 转发）
         do {
             let rsc = RootServiceClient.shared
             let svcCmd = "CMD_SHELL \(command.replacingOccurrences(of: "\n", with: " "))"
@@ -108,7 +121,30 @@ final class InjectionManager: ObservableObject {
             return (0, result)
         } catch {
             let errMsg = error.localizedDescription
-            return (-1, "无法获取 root 权限\nsu 提权失败，RootService 不可用: \(errMsg)")
+            let suHint = suTried == 0 ? "\n未检测到 su 文件（越狱可能未完整加载）" : "\n尝试了 \(suTried) 个 su 路径均未成功"
+            return (-1, "无法获取 root 权限\nsu 提权失败，RootService 不可用: \(errMsg)\(suHint)")
+        }
+    }
+
+    /// 尝试启动 RootService 后台服务（当 socket 不可用时）
+    private func tryStartRootServiceIfNeeded() {
+        let candidates = [
+            "/var/mobile/root_service",
+            "/var/jb/usr/bin/root_service",
+            "/var/jb/bin/root_service",
+            "/usr/bin/root_service",
+        ]
+        for path in candidates {
+            var exists = false
+            path.withCString { ptr in exists = access(ptr, F_OK) == 0 }
+            guard exists else { continue }
+            RuntimeLogger.shared.info("注入", "尝试启动 RootService: \(path)")
+            // 后台启动（nohup 方式，不等待结果）
+            let launchCmd = "nohup \(path) > /dev/null 2>&1 &"
+            _ = rt.executeCommand(launchCmd, environment: ["PATH": jbPath])
+            // 给服务 2 秒启动时间
+            Thread.sleep(forTimeInterval: 2.0)
+            break
         }
     }
 
@@ -138,6 +174,9 @@ final class InjectionManager: ObservableObject {
             RuntimeLogger.shared.error("注入", "未检测到越狱环境，无法注入 \(dylibPath) 到 \(app.displayName)")
             throw InjectionError.notJailbroken
         }
+
+        // ── root 预检（提前暴露权限问题）──
+        try preflightRootAccess()
 
         // ── 预检 ──
         let dylibName = (dylibPath as NSString).lastPathComponent
@@ -266,6 +305,16 @@ final class InjectionManager: ObservableObject {
             }
         }
         runAsRoot("chmod 755 '\(path)'", environment: ["PATH": jbPath])
+    }
+
+    /// 注入前 root 预检：在动手改文件前确保 root 提权可用
+    private func preflightRootAccess() throws {
+        let probe = "echo aireverse_root_ok"
+        let (code, out) = runAsRoot(probe, environment: ["PATH": jbPath])
+        if code != 0 {
+            throw InjectionError.noRootAccess("需要 root 权限才能修改 App bundle，但当前无法提权。\n请检查 su 路径或启动 RootService。")
+        }
+        RuntimeLogger.shared.info("注入", "root 预检通过: \(out.trimmingCharacters(in: .whitespacesAndNewlines))")
     }
 
     private func doInject(
