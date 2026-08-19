@@ -105,11 +105,10 @@ final class PackageScanner {
             ("认证 / Token / Key", { containsAny($0, ["token", "apikey", "api_key", "secret", "bearer", "authorization", "password", "passwd"]) }, true),
             ("登录 / 账号", { containsAny($0, ["login", "signin", "signup", "account", "username", "phone", "captcha", "oauth"]) }, false),
             ("支付 / 订阅", { containsAny($0, ["pay", "payment", "purchase", "subscribe", "subscription", "receipt", "iap", "alipay", "wechatpay"]) }, false),
-            ("越狱 / Root 检测", { containsAny($0, ["jailbreak", "cydia", "substrate", "frida", "root", "magisk", "xposed"]) }, false),
             ("SSL / 证书", { containsAny($0, ["ssl", "tls", "certificate", "cert", "pinning", "trust", "x509", "publickey"]) }, false),
             ("加密 / 哈希", { containsAny($0, ["aes", "rsa", "sha1", "sha256", "md5", "crypto", "encrypt", "decrypt", "hmac"]) }, false),
-            ("路径 / 配置文件", { containsAny($0, ["/var/", "/tmp/", "/private/", "plist", ".json", ".db", ".sqlite", ".conf"]) }, false),
-            ("动态库 / Framework", { containsAny($0, [".dylib", ".framework", "@rpath", "@loader_path", "@executable_path"]) }, false)
+            ("路径 / 配置文件", { containsAny($0, ["plist", ".json", ".db", ".sqlite", ".conf"]) }, false),
+            ("动态库 / Framework", { containsAny($0, [".framework", "@rpath", "@loader_path", "@executable_path"]) }, false)
         ]
 
         return rules.compactMap { rule in

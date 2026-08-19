@@ -24,11 +24,10 @@ struct CodingChatView: View {
     @State private var uploadError: String?
     @State private var sendTask: Task<Void, Never>?
 
-    @State private var showAppsSheet = false
-    @State private var showProcessSheet = false
-    @State private var targetApp: InstalledApp?
     @State private var showPhotoPicker = false
     @State private var hasPhotoAttachment = false
+    @State private var showProcessSheet = false
+    @State private var targetApp: InstalledApp?
 
     // MARK: - 视觉常量
 
@@ -143,23 +142,17 @@ struct CodingChatView: View {
                 importPackageFile(url)
             })
         }
+        .sheet(isPresented: $showProcessSheet) {
+            NavigationView {
+                InstalledAppsView { app in
+                    selectTargetApp(app)
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(maxSelection: 1) { images in
                 handlePhotoPicked(images)
-            }
-        }
-        .sheet(isPresented: $showAppsSheet) {
-            NavigationView {
-                InstalledAppsView(intent: .injectPlugin)
-                    .preferredColorScheme(.dark)
-            }
-        }
-        .sheet(isPresented: $showProcessSheet) {
-            NavigationView {
-                InstalledAppsView(intent: .addressToAI) { app in
-                    DispatchQueue.main.async { selectTargetApp(app) }
-                }
-                .preferredColorScheme(.dark)
             }
         }
         .onAppear {
@@ -218,14 +211,24 @@ struct CodingChatView: View {
     // MARK: - 输入区
 
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            // 浮动胶囊输入框
-            capsuleInputField
+        VStack(spacing: 4) {
+            // 目标进程徽标（带删除按钮）
+            if targetApp != nil {
+                HStack {
+                    targetAppBadge
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+            }
 
-            // 发送 / 停止按钮
-            actionButton
+            HStack(alignment: .bottom, spacing: 10) {
+                // 浮动胶囊输入框
+                capsuleInputField
+
+                // 发送 / 停止按钮
+                actionButton
+            }
         }
-        .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(background)
         .overlay(
@@ -263,10 +266,6 @@ struct CodingChatView: View {
                     .padding(.vertical, 10)
             }
 
-            // 进程/附件信息徽标
-            if targetApp != nil {
-                targetAppBadge
-            }
         }
         .padding(.horizontal, 14)
         .background(surfaceElevated)
@@ -277,6 +276,8 @@ struct CodingChatView: View {
         )
     }
 
+    // MARK: - 目标进程徽标（带删除按钮）
+
     private var targetAppBadge: some View {
         HStack(spacing: 4) {
             Image(systemName: "app.fill")
@@ -284,6 +285,16 @@ struct CodingChatView: View {
             Text(targetApp?.displayName ?? "")
                 .font(.caption2)
                 .lineLimit(1)
+
+            // 删除按钮
+            Button {
+                targetApp = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(textSecondary)
+            }
+            .buttonStyle(.plain)
         }
         .foregroundColor(accent)
         .padding(.horizontal, 8)
@@ -395,15 +406,10 @@ struct CodingChatView: View {
         }
     }
 
-    // MARK: - 底部三功能键（应用 / 相册 / 进程）— CatPaw 暗色适配
+    // MARK: - 底部功能键（相册 / 进程）— CatPaw 暗色适配
 
     private var quickActionsBar: some View {
         HStack(spacing: 0) {
-            quickActionButton(
-                title: "应用",
-                icon: "app.badge.fill",
-                enabled: !agent.isWorking
-            ) { showAppsSheet = true }
             quickActionButton(
                 title: "相册",
                 icon: "photo.on.rectangle.angled",
@@ -495,12 +501,12 @@ struct CodingChatView: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !agent.isWorking else { return }
         var prompt = trimmed
-        if let targetApp {
+        if let app = targetApp {
             prompt += """
 
-            【当前目标应用】\(targetApp.displayName)（\(targetApp.bundleID)）
-            路径：\(targetApp.bundlePath)
-            版本：\(targetApp.version)
+            【当前目标应用】\(app.displayName)（\(app.bundleID)）
+            路径：\(app.bundlePath)
+            版本：\(app.version)
             """
         }
         sendTask = Task { @MainActor in
@@ -511,6 +517,28 @@ struct CodingChatView: View {
             await agent.send(prompt, model: model)
             sendTask = nil
         }
+    }
+
+    // MARK: - 选择目标应用
+
+    private func selectTargetApp(_ app: InstalledApp) {
+        showProcessSheet = false
+        targetApp = app
+
+        // 发送提示消息到聊天
+        let content = """
+        🎯 已选中目标应用
+
+        ▪ 名称：\(app.displayName)
+        ▪ Bundle ID：\(app.bundleID)
+        ▪ 版本：\(app.version)
+        ▪ 路径：\(app.bundlePath)
+
+        💡 现在发送的消息会自动附带此应用信息。
+        点击徽标上的 ✕ 可删除此进程关联。
+        """
+
+        agent.appendLocalMessage(role: .assistant, content: content)
     }
 
     private func seedWelcome() {
@@ -601,38 +629,6 @@ struct CodingChatView: View {
         return url
     }
 
-    // MARK: - 进程目标应用
-
-    private func selectTargetApp(_ app: InstalledApp) {
-        showProcessSheet = false
-        targetApp = app
-
-        // 收集运行时信息
-        let runtimeInfo = ProcessManager.shared.runtimeInfo(forApp: app)
-        let fridaStatus = ProcessManager.shared.checkFridaStatus()
-
-        var content = """
-        🎯 已选中目标应用
-
-        \(runtimeInfo)
-
-        ---
-        🔧 环境状态
-        \(fridaStatus.summary)
-        抓包工具: \(ProcessManager.shared.checkTcpdumpAvailable() ? "✅ tcpdump 可用" : "❌ 未安装 tcpdump")
-
-        ---
-        💡 可执行操作
-        - **内存修改**：「把金币改成9999」
-        - **抓包**：「抓取该应用网络请求」
-        - **存档修改**：「修改游戏存档」
-        - **二进制修改**：「反编译修改 Mach-O」
-
-        请直接发送指令，AI 将自动生成并执行脚本。
-        """
-
-        agent.appendLocalMessage(role: .assistant, content: content)
-    }
 }
 
 // MARK: - 气泡消息行
@@ -807,26 +803,11 @@ private struct BubbleMessageRow: View {
             "git_log": "提交记录",
             "git_commit": "提交代码",
             "repo_overview": "仓库概览",
-            "list_installed_apps": "应用列表",
-            "modify_app_data": "修改应用数据",
-            "setup_root_privilege": "权限设置",
-            "root_service": "Root 服务",
             "package_scan": "扫描应用",
             "mcp_call": "MCP 调用",
             "llm_call": "模型调用",
             "github_pull": "拉取仓库",
             "github_push": "推送仓库",
-            "frida_execute": "Frida 脚本执行",
-            "frida_check": "Frida 状态检查",
-            "frida_start": "Frida 服务启动",
-            "pcap_start": "启动抓包",
-            "pcap_stop": "停止抓包",
-            "pcap_list": "抓包文件",
-            "shell_script": "Shell 脚本执行",
-            "modify_save": "修改游戏存档",
-            "read_file_plist": "读取存档文件",
-            "process_list": "进程列表",
-            "memory_scan": "内存扫描",
         ]
         if let mapped = mapping[name] { return mapped }
         return name.replacingOccurrences(of: "_", with: " ").capitalized

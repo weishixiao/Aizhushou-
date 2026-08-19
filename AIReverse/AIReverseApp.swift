@@ -22,10 +22,9 @@ struct AIReverseApp: App {
         let device = UIDevice.current
         let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"
-        let isJailbroken = JailbreakRuntime.shared.isJailbroken
         RuntimeLogger.shared.info(
             "App",
-            "启动 AIReverse v\(appVersion)(\(build))，设备 \(device.model)，系统 \(device.systemName) \(device.systemVersion)，越狱环境：\(isJailbroken ? "是" : "否")"
+            "启动 AIReverse v\(appVersion)(\(build))，设备 \(device.model)，系统 \(device.systemName) \(device.systemVersion)"
         )
     }
 }

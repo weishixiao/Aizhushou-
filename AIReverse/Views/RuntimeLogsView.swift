@@ -22,7 +22,7 @@ struct RuntimeLogsView: View {
                         Text("运行日志")
                             .font(.body)
                             .foregroundColor(.primary)
-                        Text("记录应用启动、模型请求、注入与 RootService 运行情况，保存于沙盒 Documents/Logs/runtime.log")
+                        Text("记录应用启动与模型请求运行情况，保存于沙盒 Documents/Logs/runtime.log")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
