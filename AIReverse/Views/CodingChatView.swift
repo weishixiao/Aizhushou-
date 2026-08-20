@@ -27,6 +27,8 @@ struct CodingChatView: View {
     @State private var showPhotoPicker = false
     @State private var hasPhotoAttachment = false
     @State private var showProcessSheet = false
+    @State private var showDataModSheet = false
+    @State private var dataModTarget: ProcessInfo?
     @State private var targetApp: InstalledApp?
 
     // MARK: - 视觉常量
@@ -151,6 +153,17 @@ struct CodingChatView: View {
                 selectTargetApp(app)
             }
             .preferredColorScheme(.dark)
+        }
+        .sheet(isPresented: $showDataModSheet) {
+            ProcessSelectorView(onProcessSelected: { process in
+                showDataModSheet = false
+                dataModTarget = process
+            })
+        }
+        .sheet(item: $dataModTarget) { process in
+            DataModWizardView(targetProcess: process) {
+                dataModTarget = nil
+            }
         }
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(maxSelection: 1) { images in
@@ -488,7 +501,7 @@ struct CodingChatView: View {
         )
     }
 
-    // MARK: - 底部功能键（相册 / 进程）— CatPaw 暗色适配
+    // MARK: - 底部功能键（相册 / 进程 / 数据修改）
 
     private var quickActionsBar: some View {
         HStack(spacing: 0) {
@@ -502,6 +515,11 @@ struct CodingChatView: View {
                 icon: "cpu",
                 enabled: !agent.isWorking
             ) { showProcessSheet = true }
+            quickActionButton(
+                title: "数据修改",
+                icon: "wand.and.stars",
+                enabled: !agent.isWorking
+            ) { showDataModSheet = true }
         }
         .padding(.vertical, 6)
         .background(background)

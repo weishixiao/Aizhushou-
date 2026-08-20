@@ -4,11 +4,12 @@ import UIKit
 /// 已安装应用信息模型
 struct InstalledApp: Identifiable, Equatable {
     let id = UUID()
-    let displayName: String
-    let bundleID: String
-    let bundlePath: String
-    let version: String
-    let iconData: Data?
+    var displayName: String
+    var bundleID: String
+    var bundlePath: String
+    var version: String
+    var iconData: Data?
+    var isSystem: Bool = false
 }
 
 /// 已安装应用枚举器
@@ -92,7 +93,8 @@ final class InstalledApps {
                     bundleID: bundleID,
                     bundlePath: appPath,
                     version: version,
-                    iconData: iconData
+                    iconData: iconData,
+                    isSystem: false
                 ))
             }
         }
@@ -100,7 +102,50 @@ final class InstalledApps {
         return apps.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
-    /// 判断是否为系统应用
+    /// 列出所有 App（包含系统 App），无过滤
+    func allApps() -> [InstalledApp] {
+        var apps: [InstalledApp] = []
+        let applicationsDir = "/var/containers/Bundle/Application"
+
+        guard let dirs = try? FileManager.default.contentsOfDirectory(atPath: applicationsDir) else {
+            return apps
+        }
+
+        for dir in dirs {
+            let dirPath = (applicationsDir as NSString).appendingPathComponent(dir)
+            guard let items = try? FileManager.default.contentsOfDirectory(atPath: dirPath) else { continue }
+
+            for item in items where item.hasSuffix(".app") {
+                let appPath = (dirPath as NSString).appendingPathComponent(item)
+                let infoPlistPath = (appPath as NSString).appendingPathComponent("Info.plist")
+
+                guard let info = NSDictionary(contentsOfFile: infoPlistPath) else { continue }
+
+                let bundleID = info["CFBundleIdentifier"] as? String ?? ""
+                let version = info["CFBundleShortVersionString"] as? String ?? ""
+                let executable = info["CFBundleExecutable"] as? String ?? ""
+                let displayName = appDisplayName(from: info, executable: executable)
+                let isSystem = isSystemApp(bundleID: bundleID, executable: executable)
+                let iconData = loadIcon(from: appPath, info: info)
+
+                apps.append(InstalledApp(
+                    displayName: displayName,
+                    bundleID: bundleID,
+                    bundlePath: appPath,
+                    version: version,
+                    iconData: iconData,
+                    isSystem: isSystem
+                ))
+            }
+        }
+
+        return apps.sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    /// 根据 bundleID 查找 App
+    func appFor(bundleID: String) -> InstalledApp? {
+        return allApps().first { $0.bundleID == bundleID }
+    }
     private func isSystemApp(bundleID: String, executable: String) -> Bool {
         // 空检查
         guard !bundleID.isEmpty, !executable.isEmpty else { return true }
