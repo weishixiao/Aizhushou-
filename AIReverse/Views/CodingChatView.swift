@@ -155,10 +155,10 @@ struct CodingChatView: View {
             .preferredColorScheme(.dark)
         }
         .sheet(isPresented: $showDataModSheet) {
-            ProcessSelectorView(onProcessSelected: { process in
+            ProcessSelectorView { process in
                 showDataModSheet = false
                 dataModTarget = process
-            })
+            }
         }
         .sheet(item: $dataModTarget) { process in
             DataModWizardView(targetProcess: process) {

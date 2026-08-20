@@ -118,14 +118,10 @@ final class MemoryManager: ObservableObject {
                 break
             }
 
-            var nestingDepth: uint32_t = 0
-            var infoCount: mach_msg_type_number_t = mach_msg_type_number_t(
-                MemoryLayout<vm_region_recurse_info_64_t>.size / MemoryLayout<natural_t>.size
-            )
-            var info = vm_region_recurse_info_64_t(
-                protection: 0, max_protection: 0, inheritance: VM_INHERIT_SHARE,
-                sharing: MEMORY_OBJECT_COPY_NONE, is_submap: false, is_image: false, behavior: 0
-            )
+            var nestingDepth: UInt32 = 0
+            var infoCount: mach_msg_type_number_t = 8  // vm_region_recurse_info_64: 8 x uint32_t
+            var info = UnsafeMutablePointer<UInt32>.allocate(capacity: 8)
+            info.initialize(repeating: 0, count: 8)
             var newNestingDepth: mach_vm_offset_t = 0
 
             let kr = mach_vm_region_recurse(
@@ -133,7 +129,7 @@ final class MemoryManager: ObservableObject {
                 &address,
                 &size,
                 &nestingDepth,
-                &info,
+                info,
                 &infoCount,
                 &newNestingDepth
             )
@@ -151,14 +147,14 @@ final class MemoryManager: ObservableObject {
                 continue
             }
 
-            if info.is_submap != 0 {
+            if info.load(fromByteOffset: 4, as: UInt32.self) != 0 {
                 // 子映射：跳过，vm_region_recurse 会自动深入
                 address = start + sz
                 continue
             }
 
             // 仅保留可读区域
-            let prot = UInt32(info.protection)
+            let prot = info.load(fromByteOffset: 0, as: UInt32.self)
             if prot & UInt32(VM_PROT_READ) != 0 {
                 found.append(MemoryRegion(start: start, size: sz, protection: prot))
                 totalMapped += sz
@@ -166,6 +162,8 @@ final class MemoryManager: ObservableObject {
 
             address = start + sz
         }
+
+        info.deallocate()
 
         lock.lock()
         regions = found
@@ -194,7 +192,7 @@ final class MemoryManager: ObservableObject {
         }
 
         if kr != KERN_SUCCESS {
-            throw MemoryError.readFailed(address, mach_error_string(kr))
+            throw MemoryError.readFailed(address, String(cString: mach_error_string(kr) ?? "unknown"))
         }
 
         if outSize == 0 {
@@ -212,15 +210,17 @@ final class MemoryManager: ObservableObject {
             pointer.bindMemory(to: UInt8.self).baseAddress!
         }
 
-        let kr = mach_vm_write(
-            targetTask,
-            mach_vm_address_t(address),
-            buffer,
-            mach_msg_type_number_t(data.count)
-        )
+        let kr = buffer.withMemoryRebound(to: UInt8.self, capacity: data.count) { ptr in
+            mach_vm_write(
+                targetTask,
+                mach_vm_address_t(address),
+                vm_offset_t(UInt(bitPattern: ptr)),
+                mach_msg_type_number_t(data.count)
+            )
+        }
 
         if kr != KERN_SUCCESS {
-            throw MemoryError.writeFailed(address, mach_error_string(kr))
+            throw MemoryError.writeFailed(address, String(cString: mach_error_string(kr) ?? "unknown")
         }
     }
 
@@ -271,15 +271,15 @@ final class MemoryManager: ObservableObject {
 
             // 检查区域大小限制
             let regionSize = min(Int(region.size), 1024 * 1024 * 512) // 512MB 上限
-            let pages = regionSize / PAGE_SIZE
+            let pages = regionSize / 16384
 
             totalPages += pages
             totalBytesScanned += regionSize
 
             // 逐页扫描
             for page in 0..<pages {
-                let pageAddr = region.start + UInt64(page) * UInt64(PAGE_SIZE)
-                let readSize = min(PAGE_SIZE, regionSize - Int(pageAddr - region.start))
+                let pageAddr = region.start + UInt64(page) * UInt64(16384)
+                let readSize = min(16384, regionSize - Int(pageAddr - region.start))
 
                 guard let pageData = try? self.readMemory(address: pageAddr, size: readSize) else {
                     continue
@@ -386,8 +386,47 @@ final class MemoryManager: ObservableObject {
         RuntimeLogger.shared.info("Memory", "冻结地址 0x\(String(address, radix: 16))")
     }
 
-    func unfreeze(address: UInt64) {
+    func thaw(address: UInt64) {
         freezeAddresses.remove(address)
+    }
+
+    func freeze(addresses: [UInt64]) {
+        for addr in addresses {
+            freeze(address: addr)
+        }
+    }
+
+    func thaw(addresses: [UInt64]) {
+        for addr in addresses {
+            thaw(address: addr)
+        }
+    }
+
+    // MARK: - 兼容层（给 Wizard UI 调用）
+
+    func performScan(value: String, type: ValueType, onProgress: @escaping (Int, Int, Int) -> Void = { _, _, _ in }) async -> ScanState {
+        do {
+            let results = try await firstScan(value: value, type: type) { false }
+            let regionCount = try? await enumerateRegions().count
+            let totalBytes = regionCount.map { $0 * 16384 } ?? 0
+            return ScanState(results: results, regionCount: regionCount ?? 0, totalBytes: totalBytes)
+        } catch {
+            return ScanState(results: [], regionCount: 0, totalBytes: 0)
+        }
+    }
+
+    func filterResults(previous: ScanState, value: String, type: ValueType, filter: ScanFilter) async -> ScanState {
+        do {
+            let newResults = try await nextScan(
+                value: value,
+                filter: filter,
+                type: type,
+                previousResults: previous.results
+            )
+            return ScanState(results: newResults, regionCount: previous.regionCount, totalBytes: previous.totalBytes)
+        } catch {
+            return previous
+        }
     }
 
     // MARK: - 私有辅助

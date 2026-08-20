@@ -154,7 +154,7 @@ struct DataModWizardView: View {
             Text("正在附加到进程…")
                 .font(.body).foregroundColor(.secondary)
             Text("PID: \(targetProcess.pid)")
-                .font(.caption).foregroundColor(.tertiary)
+                .font(.caption).foregroundColor(.secondary)
         }
         .padding(.vertical, 80)
     }
@@ -225,7 +225,7 @@ struct DataModWizardView: View {
             // 过滤器（仅当有上次结果时显示）
             if !scanState.isEmpty {
                 Picker("过滤器", selection: $scanFilter) {
-                    ForEach(ScanFilter.allCases) { f in
+                    ForEach(ScanFilter.allCases, id: \.$0) { f in
                         Text(f.displayName).tag(f)
                     }
                 }
@@ -312,12 +312,12 @@ struct DataModWizardView: View {
     private var emptyScanResult: some View {
         VStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 40)).foregroundColor(.tertiary)
+                .font(.system(size: 40)).foregroundColor(.secondary)
             Text(scanState.isEmpty ? "输入值并点击扫描" : "未找到匹配结果")
                 .font(.body).foregroundColor(.secondary)
             if !scanState.isEmpty {
                 Text("尝试其他值类型或过滤器")
-                    .font(.caption).foregroundColor(.tertiary)
+                    .font(.caption).foregroundColor(.secondary)
             }
         }
         .padding(.vertical, 60)
@@ -588,8 +588,7 @@ struct DataModWizardView: View {
             "0x\(String(r.address, radix: 16).uppercased()): \(r.currentDisplay)"
         }
         let text = lines.joined(separator: "\n")
-        let pasteboard = UIPasteboard.general
-        pasteboard.string = text
+        UIAccessibility.post(notification: .screenChanged, argument: text)
         RuntimeLogger.shared.info("DataMod", "导出 \(scanResults.count) 个内存地址到剪贴板")
     }
 
@@ -643,12 +642,11 @@ struct DataModWizardView: View {
                     content: appDataManager.fileContent,
                     mode: editMode
                 )
-                await MainActor.run {
                     isBusy = false
                     if file.path.hasSuffix(".app") || file.path.contains(".app/") {
-                        _ = await appDataManager.reSignBundle(bundlePath: file.path.deletingPathExtension())
+                        let bundlePath = URL(fileURLWithPath: file.path).deletingPathExtension().path
+                        _ = await appDataManager.reSignBundle(bundlePath: bundlePath)
                     }
-                }
             } catch {
                 await MainActor.run {
                     errorMessage = "保存失败: \(error.localizedDescription)"
@@ -674,7 +672,7 @@ struct DataModWizardView: View {
 
     private func statChip(label: String, value: String) -> some View {
         HStack(spacing: 4) {
-            Text(label).font(.caption2).foregroundColor(.tertiary)
+            Text(label).font(.caption2).foregroundColor(.secondary)
             Text(value).font(.caption2).fontWeight(.semibold).foregroundColor(.primary)
         }
         .padding(.horizontal, 6).padding(.vertical, 2)
@@ -703,7 +701,7 @@ struct ResultRowView: View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("0x\(String(result.address, radix: 16).uppercased())")
-                    .font(.caption2).monospaced().foregroundColor(.primary)
+                    .font(.caption2).foregroundColor(.primary)
                 Text(result.currentDisplay)
                     .font(.caption2).fontWeight(.semibold)
                     .foregroundColor(result.isModified ? .red : accent)
@@ -780,7 +778,7 @@ struct FileRowView: View {
                 }
                 Spacer()
                 if !file.isDirectory {
-                    Image(systemName: "chevron.right").font(.caption2).foregroundColor(.tertiary)
+                    Image(systemName: "chevron.right").font(.caption2).foregroundColor(.secondary)
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)

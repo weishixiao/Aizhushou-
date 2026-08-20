@@ -351,7 +351,7 @@ final class AppDataManager: ObservableObject {
 
             let hexPart = slice.map { String(format: "%02X", $0) }.joined(separator: " ")
             let asciiPart = slice.map { byte -> Character in
-                byte >= 32 && byte <= 126 ? Character(UnicodeScalar(byte)) : "."
+                byte >= 32 && byte <= 126 ? Character(UnicodeScalar(byte)) ?? "." : "."
             }.joined()
 
             lines.append(String(format: "%08X  %-48s  %@", offset, hexPart, asciiPart))

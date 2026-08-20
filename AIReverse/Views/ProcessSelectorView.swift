@@ -197,7 +197,7 @@ private struct ProcessRowView: View {
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         Text("•")
-                            .foregroundColor(.tertiary)
+                            .foregroundColor(.secondary)
                         Text(process.path)
                             .font(.caption2)
                             .foregroundColor(.secondary)
@@ -210,7 +210,7 @@ private struct ProcessRowView: View {
 
                 Image(systemName: "chevron.right")
                     .font(.caption)
-                    .foregroundColor(isSelected ? accentColor : .tertiary)
+                    .foregroundColor(isSelected ? accentColor : .secondary)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
@@ -248,7 +248,7 @@ private struct EmptyState: View {
         VStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 36))
-                .foregroundColor(.tertiary)
+                .foregroundColor(.secondary)
             Text(text)
                 .font(.body)
                 .foregroundColor(.secondary)

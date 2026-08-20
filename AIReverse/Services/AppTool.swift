@@ -312,7 +312,7 @@ final class HTTPRequestTool: CodingTool {
                     return ToolResult(success: true, output: "下载完成 → \(url.path)（\(data.count) bytes，HTTP \(httpResponse.statusCode)）")
                 }
 
-                let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .latin1) ?? "[二进制数据]"
+                let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) ?? "[二进制数据]"
                 let preview = text.count > 16000 ? String(text.prefix(16000)) + "\n...[截断]" : text
                 return ToolResult(success: true, output: "HTTP \(httpResponse.statusCode)\n\n\(preview)")
             }
@@ -356,8 +356,10 @@ echo $? >"\(exitURL.path)"
 
         // 用 posix_spawn 执行脚本
         var pid = pid_t(0)
-        let argv = ["/bin/sh", scriptURL.path]
-        let spawnResult = posix_spawn(&pid, "/bin/sh", nil, nil, argv + [nil], nil)
+        let args = ["/bin/sh", scriptURL.path]
+        let spawnResult = args.withCStringArray { argv in
+            posix_spawn(&pid, "/bin/sh", nil, nil, argv, nil)
+        }
 
         if spawnResult != 0 {
             try? FileManager.default.removeItem(at: scriptURL)
@@ -365,7 +367,7 @@ echo $? >"\(exitURL.path)"
         }
 
         // 等待子进程（带超时兜底）
-        let deadline = DispatchTime.now() + DispatchTimeInterval.seconds(Int64(max(timeout + 10, 15)))
+        let deadline = DispatchTime.now() + DispatchTimeInterval.seconds(Int(max(timeout + 10, 15)))
         var waitStatus = Int32(0)
         var waited = false
         while !waited {
