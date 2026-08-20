@@ -872,14 +872,14 @@ private struct BubbleMessageRow: View {
     private var toolTitle: String {
         guard let name = message.name, !name.isEmpty else { return "工具调用" }
         let mapping: [String: String] = [
-            "execute_command": "执行命令",
+            "shell_execute": "执行命令",
             "read_file": "读取文件",
             "list_dir": "列出目录",
             "write_file": "写入文件",
             "edit_file": "编辑文件",
-            "search_files": "查找内容",
+            "find_files": "搜索文件",
             "grep": "查找内容",
-            "find": "查找内容",
+            "http_request": "HTTP 请求",
             "git_status": "仓库状态",
             "git_branch": "分支信息",
             "git_log": "提交记录",

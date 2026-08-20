@@ -158,7 +158,6 @@ final class WorkspaceManager: ObservableObject {
             includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]
         )
         return entries
-            .filter { !$0.lastPathComponent.hasPrefix(".") }
             .map { url in
                 let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey])
                 let rel = relativePath(of: url)

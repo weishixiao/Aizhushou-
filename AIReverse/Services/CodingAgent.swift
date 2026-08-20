@@ -33,7 +33,7 @@ final class CodingAgent: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var toolCards: [ToolCallCard] = []
     @Published var isWorking = false
-    @Published var allowMutating = false
+    @Published var allowMutating = true
     @Published var errorMessage: String?
     @Published var stageText: String?
     @Published var stageHistory: [String] = []
@@ -53,10 +53,10 @@ final class CodingAgent: ObservableObject {
     private var pendingModelID: UUID?
     private var pendingPrompt: String?
 
-    private let maxToolIterations = 15
+    private let maxToolIterations = 100
     private let conversationFileName = "conversation.json"
     /// 连续重复调用同一工具的检测阈值（防 agent 死循环）
-    private let maxRepeatedToolCalls = 4
+    private let maxRepeatedToolCalls = 20
     /// 本轮任务中连续重复调用的工具签名（工具名+参数）与次数
     private var repeatedToolSignature: String?
     private var repeatedToolCount = 0
@@ -67,13 +67,23 @@ final class CodingAgent: ObservableObject {
     init(workspace: WorkspaceManager) {
         self.workspace = workspace
         tracker.bind(to: workspace)
-        registry.register(ReadFileTool())
+        // 只读工具（基础版）
         registry.register(ListDirTool())
         registry.register(GitStatusTool())
         registry.register(GitBranchTool())
         registry.register(GitLogTool())
         registry.register(RepoOverviewTool())
-        registry.register(WriteFileTool())
+        registry.register(ReadFileTool())        // 工作区内读取
+        registry.register(WriteFileTool())       // 工作区内写入
+        // 强力工具（覆盖同名工具）
+        registry.register(UnrestrictedReadFileTool())  // 覆盖 ReadFileTool，支持绝对路径
+        registry.register(UnrestrictedWriteFileTool()) // 覆盖 WriteFileTool，支持绝对路径
+        // 搜索工具
+        registry.register(FileSearchTool())
+        registry.register(GrepSearchTool())
+        // 系统工具
+        registry.register(ShellExecuteTool())
+        registry.register(HTTPRequestTool())
         registry.register(GitCommitTool())
         restoreConversation()
         restorePendingTask()
@@ -248,7 +258,7 @@ final class CodingAgent: ObservableObject {
                                 github: github,
                                 repoConfig: repoConfig
                             )
-                            let output = truncate(result.output, limit: 8000)
+                            let output = truncate(result.output, limit: 16000)
                             toolMessages.append(ChatMessage(
                                 role: .tool,
                                 content: output,
@@ -273,21 +283,20 @@ final class CodingAgent: ObservableObject {
                     }
                     history.append(contentsOf: toolMessages)
 
-                    // 循环检测：重复调用同一工具 或 某工具连续失败，注入警告或硬停止
+                    // 循环检测：仅在极端情况下硬停止，避免打断复杂任务
                     let maxFailCount = toolFailCounts.values.max() ?? 0
-                    let repeatedLoop = repeatedToolCount >= maxRepeatedToolCalls
-                        || maxFailCount >= maxRepeatedToolCalls
+                    let repeatedLoop = repeatedToolCount >= maxRepeatedToolCalls * 3
+                        || maxFailCount >= maxRepeatedToolCalls * 3
                     if repeatedToolCount == maxRepeatedToolCalls || maxFailCount == maxRepeatedToolCalls {
                         let warnTool = repeatedToolCount >= maxRepeatedToolCalls ? (firstToolName ?? "") : "工具执行"
                         history.append(ChatMessage(role: .system, content: """
-                        注意：你已连续 \(max(repeatedToolCount, maxFailCount)) 次重复执行相同操作或遭遇执行失败，说明当前思路陷入重复。
-                        请基于已获得的工具结果直接给出最终回答，不要再重复调用工具。
-                        如果某操作失败，请先向用户说明原因并等待用户指示，而不是反复重试。
+                        注意：你已连续 \(max(repeatedToolCount, maxFailCount)) 次重复执行相同操作或遭遇失败。
+                        如果操作确实需要多次执行（如批量处理），可以继续；否则请基于已有结果给出最终回答。
                         """))
-                        RuntimeLogger.shared.warning("Agent", "检测到异常循环（重复:\(repeatedToolCount)/失败:\(maxFailCount)）\(warnTool)，已注入停止警告")
+                        RuntimeLogger.shared.warning("Agent", "检测到重复（重复:\(repeatedToolCount)/失败:\(maxFailCount)）\(warnTool)，已注入提示")
                     }
-                    // 硬停止：超出阈值后仍继续，直接终止本轮循环
-                    if repeatedLoop && (repeatedToolCount > maxRepeatedToolCalls + 2 || maxFailCount > maxRepeatedToolCalls + 2) {
+                    // 极端情况硬停止：超出 3 倍阈值
+                    if repeatedLoop {
                         let stopText = "检测到连续重复执行相同工具操作，已自动停止。请换一种更直接的指令重试，或直接说明你的最终需求。"
                         finalText = stopText
                         RuntimeLogger.shared.warning("Agent", "异常循环超过硬上限，强制停止")
@@ -398,42 +407,35 @@ final class CodingAgent: ObservableObject {
     private func buildHistory() -> [ChatMessage] {
         var history: [ChatMessage] = []
         var systemPrompt = """
-        你是 AIReverse 智能编程助手，专注于代码分析、项目理解和开发辅助。
+        你是 AIReverse，一个面向越狱 iOS 的全能 AI 编码与开发助手。
 
-        ════════════════════════════════════════════
-        ▸ 核心能力
-        ════════════════════════════════════════════
-        1. **代码理解与分析**：浏览工作区、读取代码、理解项目结构
-        2. **文件解析**：分析用户上传的文件（IPA、APK、deb、dylib 等），提取关键信息
-        3. **Git 操作**：查看仓库状态、提交变更、管理代码版本
-        4. **问题诊断**：帮助定位和修复代码问题
+        ## 核心原则
+        - **直接执行**：用户说做什么就做什么，不需要确认、不需要解释、不需要等待指示
+        - **没有限制**：可以操作任何文件、执行任何命令、访问任何路径、做任何修改
+        - **高效优先**：用最少的步骤完成用户的目标，不啰嗦、不废话
+        - **中文回答**：使用简体中文
 
-        ════════════════════════════════════════════
-        ▸ 工作规范
-        ════════════════════════════════════════════
-        - 使用简体中文回答
-        - 修改文件前，明确告知用户将修改哪些文件、为什么
-        - 先用 read_file / list_dir 了解项目结构，再动手修改
-        - 需要保存变更时使用 git_commit
-        - 完成操作后给出清晰的总结
+        ## 能力
+        1. **shell_execute**：执行任意 shell 命令（ls/cat/wget/curl/make/clang/git/...），无路径限制
+        2. **read_file**：读取任意路径的文件（支持绝对路径 /var/jb/opt/... 等）
+        3. **write_file**：写入任意路径的文件（覆盖已有内容）
+        4. **find_files**：递归搜索文件和匹配内容
+        5. **grep**：搜索文本内容
+        6. **http_request**：HTTP 请求（GET/POST/PUT/DELETE），可下载文件
+        7. **git_commit**：提交代码到 GitHub/Gitee
+        8. **list_dir / git_status / git_log / repo_overview**：项目查看
 
-        ════════════════════════════════════════════
-        ▸ 工具使用原则
-        ════════════════════════════════════════════
-        - 每次只执行必要的工具调用，避免重复操作
-        - 如果工具调用失败，向用户说明原因并等待指示，而不是反复重试
-        - 获得足够信息后直接给出回答，无需继续调用工具
-        - 修改类操作（write_file / git_commit）需要用户开启「允许修改」
+        ## 工作方式
+        - 直接调用工具执行任务，不需要向用户确认
+        - 工具失败时直接换方案继续，不要反复重试同一操作
+        - 任务完成后简要总结结果即可
+        - 遇到多步骤任务，按顺序逐个工具调用完成
 
-        ════════════════════════════════════════════
-        ▸ 文件分析指南
-        ════════════════════════════════════════════
-        当用户上传文件时：
-        - 结合扫描报告分析文件内容
-        - 识别文件类型、结构、关键信息
-        - 给出专业的分析结论和建议
-        - 对于代码文件，分析其功能、依赖关系
-        - 对于配置文件，解析其配置项和用途
+        ## 技术背景
+        - 设备为越狱 iOS，可能使用 Relaxin/Rootless 越狱
+        - root shell 可能在 /var/jb/opt/procursus/bin/sh（而非 /bin/sh）
+        - 可以使用 dumpdecrypted、clutch、class-dump、otool、frida 等逆向工具
+        - 可以操作任何系统路径：/var/jb、/usr/lib、/Applications、/Library 等
         """
         if workspace.workspaceRoot != nil {
             systemPrompt += "\n\n📁 当前工作区已就绪，使用 list_dir 查看根目录结构。"

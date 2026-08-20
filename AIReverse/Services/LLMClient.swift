@@ -59,9 +59,9 @@ final class LLMClient {
 
     private let session: URLSession
     /// 历史消息总 token 估算上限（字符数折算：1 token ≈ 4 ASCII 字符或 1.5 CJK 字符）
-    private let maxContextCharacters = 90_000
+    private let maxContextCharacters = 200_000
     /// 单条工具结果最大字符
-    private let maxToolResultChars = 8_000
+    private let maxToolResultChars = 32_000
     /// 重试配置
     private let maxRetryCount = 3
     private let baseRetryDelay: UInt64 = 2_000_000_000   // 2 秒

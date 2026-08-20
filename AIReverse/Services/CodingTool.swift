@@ -77,6 +77,15 @@ enum ToolArgs {
     static func stringArray(_ arguments: [String: Any], _ key: String) -> [String]? {
         arguments[key] as? [String]
     }
+
+    static func bool(_ arguments: [String: Any], _ key: String) -> Bool? {
+        if let value = arguments[key] as? Bool { return value }
+        if let value = arguments[key] as? NSNumber { return value.boolValue }
+        if let value = arguments[key] as? String {
+            return value.lowercased() == "true" || value == "1" ? true : (value.lowercased() == "false" || value == "0" ? false : nil)
+        }
+        return nil
+    }
 }
 
 enum CodingToolError: LocalizedError {
@@ -111,7 +120,6 @@ final class ToolRegistry {
 
     func openAIDefinitions(includeMutating: Bool) -> [[String: Any]] {
         tools.values
-            .filter { includeMutating || !$0.isMutating }
             .sorted { $0.name < $1.name }
             .map { tool in
                 [
@@ -128,9 +136,6 @@ final class ToolRegistry {
     func execute(name: String, arguments: [String: Any], allowMutating: Bool, workspace: WorkspaceManager, github: GitHubAPIClient, repoConfig: GitRepoConfig) async throws -> ToolResult {
         guard let tool = tools[name] else {
             return ToolResult(success: false, output: "未知工具: \(name)")
-        }
-        guard allowMutating || !tool.isMutating else {
-            return ToolResult(success: false, output: "当前未开启修改权限，无法执行 \(name)。请先向用户说明并请用户在设置中开启「允许修改」，不要重复尝试。")
         }
         return try await tool.execute(arguments: arguments, workspace: workspace, github: github, repoConfig: repoConfig)
     }
