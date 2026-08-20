@@ -26,69 +26,65 @@ final class ProcessInspector {
     /// 枚举所有进程
     func listAllProcesses() -> [ProcessInfo] {
         var result: [ProcessInfo] = []
-        guard let count = getPidCount() else { return result }
+        guard let pids = listPids() else { return result }
 
-        guard count > 0 else { return result }
-
-        var pids = [pid_t](repeating: 0, count: Int(count) + 1)
-        let actualCount = getPidCount(into: &pids)
-        let total = min(Int(actualCount), pids.count - 1)
-
-        for i in 0..<total {
-            let pid = pids[i]
+        for pid in pids {
             guard pid > 0 else { continue }
-            let procInfo = resolveProcess(pid: pid)
-            result.append(procInfo)
+            let info = processFor(pid: pid)
+            result.append(info)
         }
         return result
     }
 
-    /// 获取指定 PID 的信息
-    func processFor(pid: Int32) -> ProcessInfo? {
-        var nameBuf = [CChar](repeating: 0, count: 256)
-        let nameLen = proc_name(pid, &nameBuf, UInt32(nameBuf.count))
-        let name = nameLen > 0 ? String(cString: nameBuf) : ""
-
-        var pathBuf = [CChar](repeating: 0, count: MAXPATHLEN)
-        let pathLen = proc_pidpath(pid, &pathBuf, UInt32(pathBuf.count))
-        let path = pathLen > 0 ? String(cString: pathBuf) : ""
-
-        let isSystem = path.hasPrefix("/System/") ||
-                        path.hasPrefix("/usr/lib/") ||
-                        path.hasPrefix("/usr/sbin/") ||
-                        path.hasPrefix("/sbin/")
-
-        return ProcessInfo(pid: pid, name: name, path: path, isSystem: isSystem)
-    }
-
-    private func resolveProcess(pid: Int32) -> ProcessInfo {
-        var nameBuf = [CChar](repeating: 0, count: 256)
-        let nameLen = proc_name(pid, &nameBuf, UInt32(nameBuf.count))
-        let name = nameLen > 0 ? String(cString: nameBuf) : ""
-
-        var pathBuf = [CChar](repeating: 0, count: MAXPATHLEN)
-        let pathLen = proc_pidpath(pid, &pathBuf, UInt32(pathBuf.count))
-        let path = pathLen > 0 ? String(cString: pathBuf) : ""
-
-        let isSystem = path.hasPrefix("/System/") ||
-                        path.hasPrefix("/usr/lib/") ||
-                        path.hasPrefix("/usr/sbin/") ||
-                        path.hasPrefix("/sbin/")
-
-        return ProcessInfo(pid: pid, name: name, path: path, isSystem: isSystem)
-    }
-
-    private func getPidCount() -> Int32? {
-        var count: Int32 = 0
-        let kr = sysctl(_psargs: ["kern.proc.pidcount"], value: &count)
-        return kr == 0 ? count : nil
-    }
-
-    private func getPidCount(into buffer: inout [pid_t]) -> Int32 {
-        var size = MemoryLayout<pid_t>.size * buffer.count
-        var kr: Int32 = 0
+    /// 通过 sysctl 获取所有 PID 列表
+    private func listPids() -> [pid_t]? {
+        // 先获取所需大小
+        var size = size_t(0)
         let mib = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        kr = sysctl(_psargs: mib, oldp: &buffer, oldlenp: &size)
-        return kr == 0 ? Int32(size / MemoryLayout<pid_t>.size) : 0
+        let kr = sysctl(mib, UInt32(mib.count), nil, &size, nil, 0)
+        guard kr == 0 else { return nil }
+        guard size > 0 else { return nil }
+
+        // 分配缓冲区
+        let entryCount = size / MemoryLayout<pid_t>.size
+        var pids = [pid_t](repeating: 0, count: Int(entryCount))
+
+        let kr2 = sysctl(mib, UInt32(mib.count), &pids, &size, nil, 0)
+        guard kr2 == 0 else { return nil }
+
+        return Array(pids[..<entryCount])
+    }
+
+    /// 获取指定 PID 的信息
+    func processFor(pid: Int32) -> ProcessInfo {
+        let path = processPath(pid: pid)
+        let name = processName(from: path)
+        let isSystem = isSystemProcess(path: path)
+        return ProcessInfo(pid: pid, name: name, path: path, isSystem: isSystem)
+    }
+
+    /// 通过 proc_pidpath 获取进程路径
+    private func processPath(pid: Int32) -> String {
+        var buf = [CChar](repeating: 0, count: 512)
+        let len = proc_pidpath(pid, &buf, UInt32(buf.count))
+        guard len > 0, len < buf.count else { return "" }
+        return String(cString: buf)
+    }
+
+    /// 从路径推导进程名称
+    private func processName(from path: String) -> String {
+        let url = URL(fileURLWithPath: path)
+        let baseName = url.deletingPathExtension().lastPathComponent
+        return baseName
+    }
+
+    /// 判断是否为系统进程
+    private func isSystemProcess(path: String) -> Bool {
+        let systemPrefixes = [
+            "/System/", "/usr/lib/", "/usr/sbin/", "/sbin/",
+            "/usr/sbin/", "/usr/bin/", "/System/Library/",
+            "/private/var/", "/bin/"
+        ]
+        return systemPrefixes.contains { path.hasPrefix($0) }
     }
 }
