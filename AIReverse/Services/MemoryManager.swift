@@ -180,16 +180,18 @@ final class MemoryManager: ObservableObject {
     func readMemory(address: UInt64, size: Int) throws -> Data {
         guard targetTask != 0 else { throw MemoryError.notAttached }
 
-        let outSize = size
-        var outBytes = [UInt8](repeating: 0, count: outSize)
+        var outBytes = [UInt8](repeating: 0, count: size)
+        var outSize: mach_vm_size_t = mach_vm_size_t(size)
 
-        let kr = vm_read_overwrite(
-            targetTask,
-            mach_vm_address_t(address),
-            mach_vm_size_t(outSize),
-            &outBytes,
-            &outSize
-        )
+        let kr = outBytes.withUnsafeMutableBufferPointer { ptr in
+            mach_vm_read_overwrite(
+                targetTask,
+                mach_vm_address_t(address),
+                mach_vm_size_t(size),
+                mach_vm_address_t(UInt(bitPattern: ptr.baseAddress!)),
+                &outSize
+            )
+        }
 
         if kr != KERN_SUCCESS {
             throw MemoryError.readFailed(address, mach_error_string(kr))
@@ -199,7 +201,7 @@ final class MemoryManager: ObservableObject {
             throw MemoryError.readFailed(address, "读取了 0 字节")
         }
 
-        return Data(bytes: outBytes, count: outSize)
+        return Data(bytes: outBytes, count: Int(outSize))
     }
 
     func writeMemory(address: UInt64, data: Data) throws {
@@ -210,7 +212,7 @@ final class MemoryManager: ObservableObject {
             pointer.bindMemory(to: UInt8.self).baseAddress!
         }
 
-        let kr = vm_write(
+        let kr = mach_vm_write(
             targetTask,
             mach_vm_address_t(address),
             buffer,

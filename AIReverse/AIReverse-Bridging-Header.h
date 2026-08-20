@@ -2,64 +2,55 @@
 //  AIReverse-Bridging-Header.h
 //  AIReverse
 //
-//  iOS SDK 不包含 libproc.h / sys/proc_info.h，
-//  因此所有 libproc 函数通过 extern 手动声明。
+//  iOS SDK 26 不包含 mach_vm.h / libproc.h / sys/proc_info.h。
+//  所有 Mach VM 和 libproc 函数通过 extern 手动声明。
 //
 
 #ifndef AIReverse_Bridging_Header_h
 #define AIReverse_Bridging_Header_h
 
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
-#include <mach/vm_region.h>
-#include <mach/vm_statistics.h>
 #include <mach/mach_error.h>
 #include <mach-o/dyld.h>
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #include <dlfcn.h>
 
-// MARK: - Mach VM 扩展
-extern kern_return_t vm_read_overwrite(
-    mach_port_name_t target_task,
-    mach_vm_address_t address,
-    mach_vm_size_t size,
-    void *dataout,
-    mach_vm_size_t *outsize
-);
+// MARK: - Mach VM 类型
+typedef unsigned long long mach_vm_address_t;
+typedef unsigned long long mach_vm_offset_t;
+typedef unsigned long long mach_vm_size_t;
 
-extern kern_return_t vm_read(
-    mach_port_name_t target_task,
-    mach_vm_address_t address,
-    mach_vm_size_t size,
-    vm_offset_t *dataout,
-    mach_vm_size_t *size_out
-);
+// MARK: - VM 保护常量
+#ifndef VM_PROT_READ
+#define VM_PROT_READ 0x01
+#endif
 
-// MARK: - libproc 函数声明（iOS SDK 不含 libproc.h）
-// 进程列表
-extern int proc_listpids(
-    int type,
-    uint32_t typeinfo,
-    void *buffer,
-    int buffersize
-);
+#ifndef VM_PROT_WRITE
+#define VM_PROT_WRITE 0x02
+#endif
 
-// 进程 PID 信息
-extern int proc_pidinfo(
-    int pid,
-    int flavor,
-    uint64_t arg,
-    void *buffer,
-    int buffersize
-);
+#ifndef VM_PROT_EXECUTE
+#define VM_PROT_EXECUTE 0x04
+#endif
 
-// 进程路径
-extern int proc_pidpath(
-    int pid,
-    void *buffer,
-    uint32_t buffersize
-);
+// MARK: - VM 继承常量
+#ifndef VM_INHERIT_SHARE
+#define VM_INHERIT_SHARE 0x01
+#endif
+
+// MARK: - 内存对象常量
+#ifndef MEMORY_OBJECT_COPY_NONE
+#define MEMORY_OBJECT_COPY_NONE 0
+#endif
+
+#ifndef MEMORY_OBJECT_COPY_SHARE
+#define MEMORY_OBJECT_COPY_SHARE 1
+#endif
+
+#ifndef MEMORY_OBJECT_COPY_PRIVATE
+#define MEMORY_OBJECT_COPY_PRIVATE 2
+#endif
 
 // MARK: - 常量回退
 #ifndef PAGE_SIZE
@@ -70,28 +61,72 @@ extern int proc_pidpath(
 #define PROC_PIDPATHINFO_MAXSIZE 512
 #endif
 
-#ifndef PROC_PIDPATHINFO_SIZE
-#define PROC_PIDPATHINFO_SIZE 512
-#endif
+// MARK: - VM 区域信息结构
+struct vm_region_recurse_info_64 {
+    uint32_t protection;
+    uint32_t max_protection;
+    uint32_t inheritance;
+    uint32_t sharing;
+    uint32_t is_submap;
+    uint32_t is_image;
+    uint32_t behavior;
+    uint32_t user_wired_count;
+};
+typedef struct vm_region_recurse_info_64 vm_region_recurse_info_64_t;
 
-#ifndef PROC_PIDTASKINFO_SIZE
-#define PROC_PIDTASKINFO_SIZE 408
-#endif
+// MARK: - Mach VM 函数
+extern kern_return_t mach_vm_read(
+    vm_map_t target_task,
+    mach_vm_address_t address,
+    mach_vm_size_t size,
+    vm_offset_t *dataout,
+    mach_vm_size_t *size_out
+);
 
-#ifndef PROC_PIDTHREADINFO_SIZE
-#define PROC_PIDTHREADINFO_SIZE 408
-#endif
+extern kern_return_t mach_vm_read_overwrite(
+    vm_map_t target_task,
+    mach_vm_address_t address,
+    mach_vm_size_t size,
+    mach_vm_address_t dataout,
+    mach_vm_size_t *outsize
+);
 
-#ifndef PROC_PIDLISTTASKS_SIZE
-#define PROC_PIDLISTTASKS_SIZE 408
-#endif
+extern kern_return_t mach_vm_write(
+    vm_map_t target_task,
+    mach_vm_address_t address,
+    vm_offset_t data,
+    mach_msg_type_number_t data_count
+);
 
-#ifndef PROC_PIDLISTFD_SIZE
-#define PROC_PIDLISTFD_SIZE 408
-#endif
+extern kern_return_t mach_vm_deallocate(
+    vm_map_t target_task,
+    mach_vm_address_t address,
+    mach_vm_size_t size
+);
 
-#ifndef PROC_ALLPIDS
-#define PROC_ALLPIDS 1
-#endif
+extern kern_return_t mach_vm_region(
+    vm_map_t target_task,
+    mach_vm_address_t *address,
+    mach_vm_size_t *size,
+    vm_region_flavor_t flavor,
+    vm_region_info_t info,
+    mach_msg_type_number_t *info_count,
+    mach_port_t *object_name
+);
+
+extern kern_return_t mach_vm_region_recurse(
+    vm_map_t target_task,
+    mach_vm_address_t *address,
+    mach_vm_size_t *size,
+    vm_region_flavor_t flavor,
+    vm_region_info_t info,
+    mach_msg_type_number_t *info_count,
+    mach_port_t *object_name
+);
+
+// MARK: - libproc 函数
+extern int proc_listpids(int type, uint32_t typeinfo, void *buffer, int buffersize);
+extern int proc_pidinfo(int pid, int flavor, uint64_t arg, void *buffer, int buffersize);
+extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 #endif /* AIReverse_Bridging_Header_h */
