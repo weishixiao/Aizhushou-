@@ -72,7 +72,7 @@ struct vm_region_recurse_info_64 {
     uint32_t behavior;
     uint32_t user_wired_count;
 };
-typedef struct vm_region_recurse_info_64 vm_region_recurse_info_64_t;
+// vm_region_recurse_info_64_t 已在 iOS SDK 中定义，不重复声明
 
 // MARK: - Mach VM 函数
 extern kern_return_t mach_vm_read(
