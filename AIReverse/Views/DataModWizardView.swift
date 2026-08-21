@@ -225,7 +225,7 @@ struct DataModWizardView: View {
             // 过滤器（仅当有上次结果时显示）
             if !scanState.isEmpty {
                 Picker("过滤器", selection: $scanFilter) {
-                    ForEach(ScanFilter.allCases, id: \.$0) { f in
+                    ForEach(ScanFilter.allCases) { f in
                         Text(f.displayName).tag(f)
                     }
                 }

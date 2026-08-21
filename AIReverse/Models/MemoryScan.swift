@@ -35,7 +35,7 @@ enum ValueType: String, CaseIterable, Identifiable {
 }
 
 // MARK: - 扫描过滤器
-enum ScanFilter: String, CaseIterable {
+enum ScanFilter: String, CaseIterable, CaseIdentifiable {
     case exact, changed, unchanged, increased, decreased
 
     var displayName: String {

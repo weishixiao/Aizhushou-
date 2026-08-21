@@ -220,7 +220,7 @@ final class MemoryManager: ObservableObject {
         }
 
         if kr != KERN_SUCCESS {
-            throw MemoryError.writeFailed(address, String(cString: mach_error_string(kr) ?? "unknown")
+            throw MemoryError.writeFailed(address, String(cString: mach_error_string(kr) ?? "unknown"))
         }
     }
 
