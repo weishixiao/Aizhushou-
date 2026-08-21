@@ -358,7 +358,8 @@ echo $? >"\(exitURL.path)"
         var pid = pid_t(0)
         let args = ["/bin/sh", scriptURL.path]
         let cstrs = args.map { NSString(string: $0).utf8String }
-        var cargs = [UnsafeMutablePointer<CChar>?](cstrs.map { $0 }) + [nil]
+        var cargs: [UnsafeMutablePointer<CChar>?] = cstrs.map { $0 }
+        cargs.append(nil)
         let spawnResult = posix_spawn(&pid, "/bin/sh", nil, nil, &cargs, nil)
 
         if spawnResult != 0 {
