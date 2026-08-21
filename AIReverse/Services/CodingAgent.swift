@@ -78,9 +78,7 @@ final class CodingAgent: ObservableObject {
         // 强力工具（覆盖同名工具）
         registry.register(UnrestrictedReadFileTool())  // 覆盖 ReadFileTool，支持绝对路径
         registry.register(UnrestrictedWriteFileTool()) // 覆盖 WriteFileTool，支持绝对路径
-        // 搜索工具
-        registry.register(FileSearchTool())
-        registry.register(GrepSearchTool())
+
         // 系统工具
         registry.register(ShellExecuteTool())
         registry.register(HTTPRequestTool())

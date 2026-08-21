@@ -357,9 +357,9 @@ echo $? >"\(exitURL.path)"
         // 用 posix_spawn 执行脚本
         var pid = pid_t(0)
         let args = ["/bin/sh", scriptURL.path]
-        let spawnResult = args.withCStringArray { argv in
-            posix_spawn(&pid, "/bin/sh", nil, nil, argv, nil)
-        }
+        let cstrs = args.map { NSString(string: $0).utf8String }
+        var cargs = [UnsafeMutablePointer<CChar>?](cstrs.map { $0 }) + [nil]
+        let spawnResult = posix_spawn(&pid, "/bin/sh", nil, nil, &cargs, nil)
 
         if spawnResult != 0 {
             try? FileManager.default.removeItem(at: scriptURL)
