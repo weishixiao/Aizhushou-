@@ -27,6 +27,7 @@ struct CodingChatView: View {
     @State private var showPhotoPicker = false
     @State private var hasPhotoAttachment = false
     @State private var showProcessSheet = false
+    @State private var showSessionMenu = false
 
     @State private var targetApp: InstalledApp?
 
@@ -103,6 +104,24 @@ struct CodingChatView: View {
                     showWorkspaceView = true
                 } label: {
                     Image(systemName: "folder.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .foregroundColor(accent)
+                }
+
+                // 会话管理
+                Menu {
+                    Button {
+                        newSession()
+                    } label: {
+                        Label("新会话", systemImage: "plus.text")
+                    }
+                    Button {
+                        clearContext()
+                    } label: {
+                        Label("清空上下文", systemImage: "eraser.line.dashed")
+                    }
+                } label: {
+                    Image(systemName: "circle.hexagon")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(accent)
                 }
@@ -564,6 +583,27 @@ struct CodingChatView: View {
         sendTask?.cancel()
         sendTask = nil
         agent.cancel()
+    }
+
+    /// 打开新会话窗口：清空当前消息并重置上下文
+    private func newSession() {
+        sendTask?.cancel()
+        sendTask = nil
+        agent.cancel()
+        agent.resetConversation()
+        inputText = ""
+        targetApp = nil
+        showProcessSheet = false
+    }
+
+    /// 清空上下文：只清空消息，保留其他状态
+    private func clearContext() {
+        if agent.isWorking {
+            sendTask?.cancel()
+            sendTask = nil
+            agent.cancel()
+        }
+        agent.resetConversation()
     }
 
     private var resumeTargetModel: AIModelConfig? {
