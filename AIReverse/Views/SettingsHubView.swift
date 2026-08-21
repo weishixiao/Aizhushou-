@@ -41,6 +41,17 @@ struct SettingsHubView: View {
                 }
 
                 NavigationLink {
+                    LocalWorkspaceView(workspace: agent.workspace)
+                } label: {
+                    featureRow(
+                        icon: "folder.badge.gearshape",
+                        color: .orange,
+                        title: "本地文件",
+                        subtitle: "浏览、上传、下载工作区文件"
+                    )
+                }
+
+                NavigationLink {
                     RepoManagerView(agent: agent)
                 } label: {
                     featureRow(

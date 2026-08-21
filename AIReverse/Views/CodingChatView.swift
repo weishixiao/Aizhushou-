@@ -17,7 +17,6 @@ struct CodingChatView: View {
 
     @State private var inputText = ""
     @State private var showModelSettings = false
-    @State private var showWorkspaceView = false
     @State private var showUploadPicker = false
     @State private var uploadedFileName: String?
     @State private var uploadedFileURL: URL?
@@ -27,7 +26,6 @@ struct CodingChatView: View {
     @State private var showPhotoPicker = false
     @State private var hasPhotoAttachment = false
     @State private var showProcessSheet = false
-    @State private var showSessionMenu = false
 
     @State private var targetApp: InstalledApp?
 
@@ -99,15 +97,6 @@ struct CodingChatView: View {
                 }
                 .disabled(modelStore.models.isEmpty)
 
-                // 文件管理
-                Button {
-                    showWorkspaceView = true
-                } label: {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(accent)
-                }
-
                 // 会话管理
                 Menu {
                     Button {
@@ -121,7 +110,7 @@ struct CodingChatView: View {
                         Label("清空上下文", systemImage: "eraser.line.dashed")
                     }
                 } label: {
-                    Image(systemName: "circle.hexagon")
+                    Image(systemName: "rectangle.on.rectangle")
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(accent)
                 }
@@ -146,17 +135,6 @@ struct CodingChatView: View {
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("完成") { showModelSettings = false }
-                        }
-                    }
-            }
-        }
-        .sheet(isPresented: $showWorkspaceView) {
-            NavigationView {
-                LocalWorkspaceView(workspace: agent.workspace)
-                    .preferredColorScheme(.dark)
-                    .toolbar {
-                        ToolbarItem(placement: .navigationBarTrailing) {
-                            Button("完成") { showWorkspaceView = false }
                         }
                     }
             }
