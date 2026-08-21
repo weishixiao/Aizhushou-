@@ -363,7 +363,7 @@ echo $? >"\(exitURL.path)"
 
         if spawnResult != 0 {
             try? FileManager.default.removeItem(at: scriptURL)
-            return ToolResult(success: false, output: "posix_spawn 失败：\(String(cString: strerror(spawnResult)))")
+            return ToolResult(success: false, output: "posix_spawn 失败：\(String(cString: strerror(CInt(spawnResult))!))")
         }
 
         // 等待子进程（带超时兜底）
