@@ -2,14 +2,14 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// CatPaw 风格编程助手聊天界面
+/// AIReverse 聊天界面
 ///
 /// 视觉设计：
-/// - 深色主题（#1C1C1E 类 dark mode）
+/// - 白色扁平化主题
 /// - 气泡式对话（右侧用户消息 / 左侧 AI 文本）
 /// - 工具调用以内联执行卡片形式呈现
 /// - 顶部状态栏以细点 + 文字展示当前阶段
-/// - 底部胶囊式浮动输入框
+/// - 底部胶囊式输入框（集成相册与文件上传）
 struct CodingChatView: View {
     @EnvironmentObject var modelStore: ModelStore
     @Environment(\.scenePhase) private var scenePhase
@@ -27,21 +27,17 @@ struct CodingChatView: View {
     @State private var hasPhotoAttachment = false
     /// 随下一条消息发送的图片（已压缩）
     @State private var pendingImageData: Data?
-    @State private var showProcessSheet = false
-
-    @State private var targetApp: InstalledApp?
-
     // MARK: - 视觉常量
 
     /// accent: CatPaw 绿 (调和自旧版 MonkeyCode 绿，适配深色背景更亮)
-    private let accent = Color(red: 0.36, green: 0.80, blue: 0.48)
-    private let background = Color(red: 0.10, green: 0.10, blue: 0.11)      // #1A1A1C
-    private let surface = Color(red: 0.15, green: 0.15, blue: 0.16)          // #262629
-    private let surfaceElevated = Color(red: 0.20, green: 0.20, blue: 0.22)
-    private let userBubble = Color(red: 0.25, green: 0.55, blue: 0.35)       // 暗色绿
-    private let textPrimary = Color(white: 0.96)
-    private let textSecondary = Color(white: 0.62)
-    private let cardBorder = Color(white: 0.18)
+    private let accent = Color(red: 0.20, green: 0.48, blue: 0.96)           // iOS 蓝
+    private let background = Color(white: 1.0)                                 // 纯白
+    private let surface = Color(red: 0.96, green: 0.96, blue: 0.97)           // #F5F5F7
+    private let surfaceElevated = Color(red: 0.93, green: 0.93, blue: 0.95)  // #EDEDEF
+    private let userBubble = Color(red: 0.20, green: 0.48, blue: 0.96)       // 蓝（扁平）
+    private let textPrimary = Color(white: 0.11)
+    private let textSecondary = Color(white: 0.45)
+    private let cardBorder = Color(white: 0.88)
     private let packageExtensions: Set<String> = ["ipa", "tipa", "deb", "dylib", "apk"]
 
     init(workspace: WorkspaceManager) {
@@ -57,12 +53,11 @@ struct CodingChatView: View {
             if agent.isWorking {
                 workingToolbar
             }
-            quickActionsBar
             inputBar
         }
         .background(background.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(.light)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
@@ -133,7 +128,7 @@ struct CodingChatView: View {
         .sheet(isPresented: $showModelSettings) {
             NavigationView {
                 SettingsHubView(agent: agent)
-                    .preferredColorScheme(.dark)
+                    .preferredColorScheme(.light)
                     .toolbar {
                         ToolbarItem(placement: .navigationBarTrailing) {
                             Button("完成") { showModelSettings = false }
@@ -146,13 +141,6 @@ struct CodingChatView: View {
                 importPackageFile(url)
             })
         }
-        .sheet(isPresented: $showProcessSheet) {
-            InstalledAppsView { app in
-                selectTargetApp(app)
-            }
-            .preferredColorScheme(.dark)
-        }
-
         .sheet(isPresented: $showPhotoPicker) {
             PhotoPicker(maxSelection: 1) { images in
                 handlePhotoPicked(images)
@@ -223,24 +211,6 @@ struct CodingChatView: View {
 
     private var inputBar: some View {
         VStack(spacing: 4) {
-            // 目标进程徽标（带删除按钮）
-            if targetApp != nil {
-                HStack {
-                    targetAppBadge
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-            }
-
-            // 待发送图片徽标
-            if hasPhotoAttachment {
-                HStack {
-                    photoAttachmentBadge
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-            }
-
             HStack(alignment: .bottom, spacing: 10) {
                 // 浮动胶囊输入框
                 capsuleInputField
@@ -261,7 +231,7 @@ struct CodingChatView: View {
 
     private var capsuleInputField: some View {
         HStack(alignment: .bottom, spacing: 4) {
-            // 附件按钮
+            // 文件上传按钮
             Button {
                 showUploadPicker = true
             } label: {
@@ -272,6 +242,19 @@ struct CodingChatView: View {
                     .padding(.bottom, 8)
             }
             .buttonStyle(.plain)
+
+            // 相册按钮（集中在输入框内）
+            Button {
+                showPhotoPicker = true
+            } label: {
+                Image(systemName: "photo")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(hasPhotoAttachment ? accent : textSecondary)
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 8)
+            }
+            .buttonStyle(.plain)
+            .disabled(agent.isWorking)
 
             // 输入框
             if #available(iOS 16.0, *) {
@@ -296,76 +279,7 @@ struct CodingChatView: View {
         )
     }
 
-    // MARK: - 目标进程徽标（带删除按钮）
-
-    private var targetAppBadge: some View {
-        HStack(spacing: 6) {
-            // 应用小图标
-            Group {
-                if let data = targetApp?.iconData, let uiImage = UIImage(data: data) {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                } else {
-                    // 首字母占位
-                    let initial = targetApp?.displayName.first?.uppercased() ?? "?"
-                    Text(initial)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-            }
-            .frame(width: 18, height: 18)
-            .background(Color.green.opacity(0.5))
-            .clipShape(RoundedRectangle(cornerRadius: 4))
-
-            Text(targetApp?.displayName ?? "")
-                .font(.caption2)
-                .lineLimit(1)
-
-            // 删除按钮
-            Button {
-                targetApp = nil
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundColor(textSecondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .foregroundColor(accent)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(accent.opacity(0.12))
-        .clipShape(Capsule())
-        .padding(.bottom, 6)
-    }
-
-    // MARK: - 待发送图片徽标
-
-    private var photoAttachmentBadge: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "photo.fill")
-                .font(.system(size: 11))
-            Text("图片将随下一条消息发送")
-                .font(.caption2)
-                .lineLimit(1)
-            Button {
-                pendingImageData = nil
-                hasPhotoAttachment = false
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12))
-                    .foregroundColor(textSecondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .foregroundColor(accent)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(accent.opacity(0.12))
-        .clipShape(Capsule())
-        .padding(.bottom, 6)
-    }
+    // MARK: - 发送按钮
 
     private var actionButton: some View {
         Button {
@@ -533,49 +447,6 @@ struct CodingChatView: View {
         )
     }
 
-    // MARK: - 底部功能键（相册 / 进程 / 数据修改）
-
-    private var quickActionsBar: some View {
-        HStack(spacing: 0) {
-            quickActionButton(
-                title: "相册",
-                icon: "photo.on.rectangle.angled",
-                enabled: !agent.isWorking
-            ) { showPhotoPicker = true }
-            quickActionButton(
-                title: "进程",
-                icon: "cpu",
-                enabled: !agent.isWorking
-            ) { showProcessSheet = true }
-            
-        }
-        .padding(.vertical, 6)
-        .background(background)
-        .overlay(
-            Rectangle()
-                .fill(surfaceElevated)
-                .frame(height: 0.5),
-            alignment: .top
-        )
-    }
-
-    private func quickActionButton(title: String, icon: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 3) {
-                Image(systemName: icon)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(enabled ? accent : textSecondary.opacity(0.4))
-                Text(title)
-                    .font(.caption2)
-                    .foregroundColor(enabled ? textSecondary : textSecondary.opacity(0.4))
-            }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-    }
-
     // MARK: - Actions
 
     private var sendButtonColor: Color {
@@ -616,8 +487,6 @@ struct CodingChatView: View {
         agent.cancel()
         agent.resetConversation()
         inputText = ""
-        targetApp = nil
-        showProcessSheet = false
     }
 
     /// 清空上下文：只清空消息，保留其他状态
@@ -649,15 +518,7 @@ struct CodingChatView: View {
     private func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !agent.isWorking else { return }
-        var prompt = trimmed
-        if let app = targetApp {
-            prompt += """
-
-            【当前目标应用】\(app.displayName)（\(app.bundleID)）
-            路径：\(app.bundlePath)
-            版本：\(app.version)
-            """
-        }
+        let prompt = trimmed
         let image = pendingImageData
         pendingImageData = nil
         hasPhotoAttachment = false
@@ -669,28 +530,6 @@ struct CodingChatView: View {
             await agent.send(prompt, model: model, imageData: image)
             sendTask = nil
         }
-    }
-
-    // MARK: - 选择目标应用
-
-    private func selectTargetApp(_ app: InstalledApp) {
-        showProcessSheet = false
-        targetApp = app
-
-        // 发送提示消息到聊天
-        let content = """
-        🎯 已选中目标应用
-
-        ▪ 名称：\(app.displayName)
-        ▪ Bundle ID：\(app.bundleID)
-        ▪ 版本：\(app.version)
-        ▪ 路径：\(app.bundlePath)
-
-        💡 现在发送的消息会自动附带此应用信息。
-        点击徽标上的 ✕ 可删除此进程关联。
-        """
-
-        agent.appendLocalMessage(role: .assistant, content: content)
     }
 
     private func seedWelcome() {
@@ -803,13 +642,13 @@ struct CodingChatView: View {
 private struct BubbleMessageRow: View {
     let message: ChatMessage
 
-    private let userBubble = Color(red: 0.22, green: 0.50, blue: 0.32)   // 深绿
-    private let surface = Color(red: 0.15, green: 0.15, blue: 0.16)
-    private let surfaceElevated = Color(red: 0.20, green: 0.20, blue: 0.22)
-    private let accent = Color(red: 0.36, green: 0.80, blue: 0.48)
-    private let textPrimary = Color(white: 0.96)
-    private let textSecondary = Color(white: 0.62)
-    private let textTime = Color(white: 0.45)
+    private let userBubble = Color(red: 0.20, green: 0.48, blue: 0.96)   // 蓝
+    private let surface = Color(red: 0.96, green: 0.96, blue: 0.97)
+    private let surfaceElevated = Color(red: 0.93, green: 0.93, blue: 0.95)
+    private let accent = Color(red: 0.20, green: 0.48, blue: 0.96)
+    private let textPrimary = Color(white: 0.11)
+    private let textSecondary = Color(white: 0.45)
+    private let textTime = Color(white: 0.60)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -875,13 +714,7 @@ private struct BubbleMessageRow: View {
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(
-                        LinearGradient(
-                            colors: [userBubble, userBubble.opacity(0.85)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .background(userBubble)
                     .clipShape(
                         RoundedCorner(radius: 18, corners: [.topLeft, .topRight, .bottomLeft])
                     )
@@ -949,7 +782,7 @@ private struct BubbleMessageRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(white: 0.18), lineWidth: 0.5)
+                .stroke(Color(white: 0.88), lineWidth: 0.5)
         )
         .padding(.leading, 36)  // 缩进对齐 AI 消息正文
     }
