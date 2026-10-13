@@ -30,22 +30,53 @@ struct CodingChatView: View {
     // MARK: - 视觉常量
 
     /// accent: CatPaw 绿 (调和自旧版 MonkeyCode 绿，适配深色背景更亮)
-    private let accent = Color(red: 0.20, green: 0.48, blue: 0.96)           // iOS 蓝
+    private let accent = Color(red: 0.18, green: 0.78, blue: 0.35)            // OpenMinis 绿 #2EC759
     private let background = Color(white: 1.0)                                 // 纯白
-    private let surface = Color(red: 0.96, green: 0.96, blue: 0.97)           // #F5F5F7
-    private let surfaceElevated = Color(red: 0.93, green: 0.93, blue: 0.95)  // #EDEDEF
-    private let userBubble = Color(red: 0.20, green: 0.48, blue: 0.96)       // 蓝（扁平）
-    private let textPrimary = Color(white: 0.11)
+    private let surface = Color(red: 0.95, green: 0.95, blue: 0.97)           // #F2F2F7
+    private let surfaceElevated = Color(red: 0.93, green: 0.93, blue: 0.95)
+    private let userBubble = Color(red: 0.95, green: 0.95, blue: 0.97)      // 浅灰气泡
+    private let textPrimary = Color(white: 0.04)
     private let textSecondary = Color(white: 0.45)
-    private let cardBorder = Color(white: 0.88)
+    private let cardBorder = Color(white: 0.87)
     private let packageExtensions: Set<String> = ["ipa", "tipa", "deb", "dylib", "apk"]
 
     init(workspace: WorkspaceManager) {
         _agent = StateObject(wrappedValue: CodingAgent(workspace: workspace))
     }
 
+    // MARK: - 上下文用量条（OpenMinis 风格）
+
+    private var contextBar: some View {
+        let totalChars = agent.messages.reduce(0) { $0 + $1.content.count }
+        let maxChars = 100_000
+        let pct = min(Double(totalChars) / Double(maxChars), 1.0)
+        return HStack(spacing: 6) {
+            Image(systemName: "text.alignleft")
+                .font(.system(size: 10))
+                .foregroundColor(textSecondary)
+            Text("上下文已用 \(Int(pct * 100))% · \(totalChars / 1000)k / \(maxChars / 1000)k")
+                .font(.system(size: 11))
+                .foregroundColor(textSecondary)
+            Spacer(minLength: 0)
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(accent.opacity(0.2))
+                    .overlay(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(accent)
+                            .frame(width: geo.size.width * pct)
+                    }
+            }
+            .frame(height: 4)
+            .frame(maxWidth: 80)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
+            contextBar
             statusBar
             messageList
             uploadStatusBar
@@ -642,13 +673,18 @@ struct CodingChatView: View {
 private struct BubbleMessageRow: View {
     let message: ChatMessage
 
-    private let userBubble = Color(red: 0.20, green: 0.48, blue: 0.96)   // 蓝
-    private let surface = Color(red: 0.96, green: 0.96, blue: 0.97)
+    private let userBubble = Color(red: 0.95, green: 0.95, blue: 0.97)   // 浅灰
+    private let surface = Color(red: 0.95, green: 0.95, blue: 0.97)
     private let surfaceElevated = Color(red: 0.93, green: 0.93, blue: 0.95)
-    private let accent = Color(red: 0.20, green: 0.48, blue: 0.96)
-    private let textPrimary = Color(white: 0.11)
+    private let accent = Color(red: 0.18, green: 0.78, blue: 0.35)       // 绿 #2EC759
+    private let textPrimary = Color(white: 0.04)
     private let textSecondary = Color(white: 0.45)
     private let textTime = Color(white: 0.60)
+    // 工具卡专用：OpenMinis 深色卡片
+    private let toolCardBg = Color(red: 0.12, green: 0.12, blue: 0.14)   // #1E1E23
+    private let toolCardText = Color(white: 0.88)
+    private let toolCardSubtext = Color(white: 0.55)
+    private let toolCardFail = Color(red: 0.85, green: 0.40, blue: 0.40)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -711,7 +747,7 @@ private struct BubbleMessageRow: View {
                 }
                 Text(message.content)
                     .font(.system(size: 15))
-                    .foregroundColor(.white)
+                    .foregroundColor(textPrimary)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     .background(userBubble)
@@ -756,21 +792,21 @@ private struct BubbleMessageRow: View {
                     PulseDot(color: toolAccent, size: 6)
                     Text(toolTitle)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(textPrimary)
+                        .foregroundColor(toolCardText)
                     Spacer()
                     Text(message.name ?? "")
                         .font(.caption2)
-                        .foregroundColor(textSecondary)
+                        .foregroundColor(toolCardSubtext)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(surface)
+                        .background(Color(white: 0.18))
                         .clipShape(Capsule())
                 }
                 // 结果
                 if !message.content.isEmpty {
                     Text(message.content)
                         .font(.system(.caption, design: .monospaced))
-                        .foregroundColor(textSecondary)
+                        .foregroundColor(toolCardSubtext)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -778,18 +814,18 @@ private struct BubbleMessageRow: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
         }
-        .background(surface)
+        .background(toolCardBg)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color(white: 0.88), lineWidth: 0.5)
+                .stroke(Color(white: 0.20), lineWidth: 0.5)
         )
         .padding(.leading, 36)  // 缩进对齐 AI 消息正文
     }
 
     private var toolAccent: Color {
         if message.content.contains("失败") || message.content.contains("错误") {
-            return Color(red: 0.95, green: 0.45, blue: 0.45)
+            return toolCardFail
         }
         return accent
     }
