@@ -197,6 +197,11 @@ struct CodingChatView: View {
                         BubbleMessageRow(message: msg)
                             .id(msg.id)
                     }
+                    // 流式输出中的回复（逐字增长）
+                    if let streaming = agent.streamingText {
+                        BubbleMessageRow(message: ChatMessage(role: .assistant, content: streaming))
+                            .id("streaming")
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -207,6 +212,9 @@ struct CodingChatView: View {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
+            }
+            .onChange(of: agent.streamingText) { _ in
+                proxy.scrollTo("streaming", anchor: .bottom)
             }
         }
     }
@@ -746,22 +754,35 @@ struct CodingChatView: View {
 
     private func handlePhotoPicked(_ images: [UIImage]) {
         guard let first = images.first else { return }
-        hasPhotoAttachment = true
-        if let data = first.jpegData(compressionQuality: 0.8) {
-            let hash = String(format: "%06d", Int(Date().timeIntervalSince1970) % 1000000)
-            let fileName = "photo_\(hash).jpg"
-            if let url = savePhotoData(data, name: fileName),
-               let dim = ImageDimension.from(data: data) {
-                agent.appendLocalMessage(
-                    role: .user,
-                    content: "已添加图片：\(fileName)（\(dim.width)x\(dim.height)）"
-                )
-                agent.appendLocalMessage(
-                    role: .assistant,
-                    content: "已收到图片，告诉我你需要对它做什么：OCR / 构图分析 / …"
-                )
-            }
+        // 压缩到适合发送的尺寸（长边 ≤1600px，JPEG 0.7）作为真实附件
+        guard let data = Self.normalizedJPEGData(from: first) else {
+            uploadError = "图片处理失败，请重试"
+            return
         }
+        pendingImageData = data
+        hasPhotoAttachment = true
+        uploadError = nil
+        // 原图归档到 Uploads（供文件管理 / shell 工具访问）
+        let hash = String(format: "%06d", Int(Date().timeIntervalSince1970) % 1000000)
+        _ = savePhotoData(first.jpegData(compressionQuality: 0.9) ?? data, name: "photo_\(hash).jpg")
+    }
+
+    /// 长边超过 1600px 时等比缩放，返回 JPEG 数据
+    private static func normalizedJPEGData(from image: UIImage) -> Data? {
+        let maxSide: CGFloat = 1600
+        var target = image
+        let longest = max(image.size.width, image.size.height)
+        if longest > maxSide {
+            let ratio = maxSide / longest
+            let newSize = CGSize(width: image.size.width * ratio, height: image.size.height * ratio)
+            UIGraphicsBeginImageContextWithOptions(newSize, true, 1)
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+            if let resized = UIGraphicsGetImageFromCurrentImageContext() {
+                target = resized
+            }
+            UIGraphicsEndImageContext()
+        }
+        return target.jpegData(compressionQuality: 0.7)
     }
 
     private func savePhotoData(_ data: Data, name: String) -> URL? {
@@ -839,22 +860,33 @@ private struct BubbleMessageRow: View {
     private var userBubbleRow: some View {
         HStack(alignment: .bottom, spacing: 8) {
             Spacer(minLength: 0)
-            Text(message.content)
-                .font(.system(size: 15))
-                .foregroundColor(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(
-                    LinearGradient(
-                        colors: [userBubble, userBubble.opacity(0.85)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+            VStack(alignment: .trailing, spacing: 6) {
+                if let data = message.imageData, let ui = UIImage(data: data) {
+                    Image(uiImage: ui)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: UIScreen.main.bounds.width * 0.5, maxHeight: 220)
+                        .clipShape(
+                            RoundedCorner(radius: 14, corners: [.topLeft, .topRight, .bottomLeft])
+                        )
+                }
+                Text(message.content)
+                    .font(.system(size: 15))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(
+                        LinearGradient(
+                            colors: [userBubble, userBubble.opacity(0.85)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
-                )
-                .clipShape(
-                    RoundedCorner(radius: 18, corners: [.topLeft, .topRight, .bottomLeft])
-                )
-                .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: .trailing)
+                    .clipShape(
+                        RoundedCorner(radius: 18, corners: [.topLeft, .topRight, .bottomLeft])
+                    )
+            }
+            .frame(maxWidth: UIScreen.main.bounds.width * 0.72, alignment: .trailing)
         }
     }
 

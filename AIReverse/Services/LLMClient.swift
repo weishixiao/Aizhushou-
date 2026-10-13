@@ -445,17 +445,22 @@ final class LLMClient {
     private func anthropicMessages(_ messages: [ChatMessage]) -> [[String: Any]] {
         var result: [[String: Any]] = []
 
-        func appendUserText(_ content: String) {
-            guard !content.isEmpty else { return }
+        func appendUserBlocks(_ blocks: [[String: Any]]) {
+            guard !blocks.isEmpty else { return }
             if var last = result.last, last["role"] as? String == "user",
                let arr = last["content"] as? [[String: Any]] {
                 var merged = arr
-                merged.append(["type": "text", "text": content])
+                merged.append(contentsOf: blocks)
                 last["content"] = merged
                 result[result.count - 1] = last
             } else {
-                result.append(["role": "user", "content": [["type": "text", "text": content]]])
+                result.append(["role": "user", "content": blocks])
             }
+        }
+
+        func appendUserText(_ content: String) {
+            guard !content.isEmpty else { return }
+            appendUserBlocks([["type": "text", "text": content]])
         }
 
         for msg in messages {
@@ -463,7 +468,23 @@ final class LLMClient {
             case .system:
                 continue
             case .user:
-                appendUserText(msg.content)
+                if let imageData = msg.imageData {
+                    // 多模态：image block + 可选 text block
+                    var blocks: [[String: Any]] = [[
+                        "type": "image",
+                        "source": [
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": imageData.base64EncodedString()
+                        ]
+                    ]]
+                    if !msg.content.isEmpty {
+                        blocks.append(["type": "text", "text": msg.content])
+                    }
+                    appendUserBlocks(blocks)
+                } else {
+                    appendUserText(msg.content)
+                }
             case .assistant:
                 var blocks: [[String: Any]] = []
                 if !msg.content.isEmpty {
@@ -697,7 +718,8 @@ final class LLMClient {
         return url
     }
 
-    private func post(endpoint: URL, body: [String: Any], model: AIModelConfig) async throws -> Data {
+    /// 构造带认证头的 POST 请求（post() 与流式共用）
+    private func makePostRequest(endpoint: URL, body: [String: Any], model: AIModelConfig) throws -> URLRequest {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -713,6 +735,11 @@ final class LLMClient {
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    private func post(endpoint: URL, body: [String: Any], model: AIModelConfig) async throws -> Data {
+        let request = try makePostRequest(endpoint: endpoint, body: body, model: model)
 
         let data: Data
         let response: URLResponse

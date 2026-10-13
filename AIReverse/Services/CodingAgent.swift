@@ -33,7 +33,9 @@ final class CodingAgent: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var toolCards: [ToolCallCard] = []
     @Published var isWorking = false
-    @Published var allowMutating = true
+    @Published var allowMutating = false
+    /// 流式输出：正在生成的 assistant 文本（nil = 无进行中的流式回复）
+    @Published var streamingText: String?
     @Published var errorMessage: String?
     @Published var stageText: String?
     @Published var stageHistory: [String] = []
