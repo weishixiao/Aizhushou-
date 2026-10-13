@@ -87,6 +87,208 @@ final class LLMClient {
         }
     }
 
+    // MARK: - 流式输出（SSE）
+
+    /// 流式聊天：与 chat() 等价，但文本增量通过 onDelta 逐段回调（顺序保证），
+    /// 最终返回与 chat() 相同结构的完整 LLMReply。工具调用不做增量回调。
+    func chatStream(
+        model: AIModelConfig,
+        messages: [ChatMessage],
+        tools: [[String: Any]]? = nil,
+        onDelta: (String) async -> Void
+    ) async throws -> LLMReply {
+        guard model.isFilled else { throw LLMError.emptyConfig }
+        let trimmed = truncateHistory(messages)
+        switch model.apiType {
+        case .openAI:
+            return try await openAIChatStream(model: model, messages: trimmed, tools: tools, onDelta: onDelta)
+        case .anthropic:
+            return try await anthropicChatStream(model: model, messages: trimmed, tools: tools, onDelta: onDelta)
+        }
+    }
+
+    private func openAIChatStream(model: AIModelConfig, messages: [ChatMessage], tools: [[String: Any]]?, onDelta: (String) async -> Void) async throws -> LLMReply {
+        let endpoint = try endpointURL(model, apiType: .openAI)
+        var body: [String: Any] = [
+            "model": model.modelID,
+            "stream": true,
+            "messages": messages.map { openAIMessageDict($0) }
+        ]
+        if model.maxTokens > 0 {
+            body["max_tokens"] = model.maxTokens
+        }
+        if let tools, !tools.isEmpty {
+            body["tools"] = tools
+        }
+
+        let request = try makePostRequest(endpoint: endpoint, body: body, model: model)
+        let stream: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (stream, response) = try await session.bytes(for: request)
+        } catch {
+            throw LLMError.network(error)
+        }
+        try await checkStreamStatus(response, stream: stream)
+
+        var fullText = ""
+        /// 工具调用增量累积：index -> (id, name, argumentsJSON)
+        var pending: [Int: (id: String, name: String, args: String)] = [:]
+
+        do {
+            for try await line in stream.lines {
+                if Task.isCancelled { throw CancellationError() }
+                guard line.hasPrefix("data:") else { continue }
+                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                if payload == "[DONE]" { break }
+                guard let json = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] else { continue }
+                if let error = json["error"] as? [String: Any] {
+                    let msg = error["message"] as? String ?? "stream error"
+                    throw LLMError.badStatus(500, msg)
+                }
+                guard let choices = json["choices"] as? [[String: Any]],
+                      let first = choices.first else { continue }
+                guard let delta = first["delta"] as? [String: Any] else { continue }
+                if let content = delta["content"] as? String, !content.isEmpty {
+                    fullText += content
+                    await onDelta(content)
+                }
+                if let deltas = delta["tool_calls"] as? [[String: Any]] {
+                    for tc in deltas {
+                        let idx = (tc["index"] as? NSNumber)?.intValue ?? pending.count
+                        var entry = pending[idx] ?? ("", "", "")
+                        if let id = tc["id"] as? String, !id.isEmpty { entry.id = id }
+                        if let fn = tc["function"] as? [String: Any] {
+                            if let n = fn["name"] as? String, !n.isEmpty { entry.name = n }
+                            if let a = fn["arguments"] as? String { entry.args += a }
+                        }
+                        pending[idx] = entry
+                    }
+                }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let e as LLMError {
+            throw e
+        } catch {
+            throw LLMError.network(error)
+        }
+
+        if !pending.isEmpty {
+            var calls: [ToolCall] = []
+            for key in pending.keys.sorted() {
+                guard let e = pending[key] else { continue }
+                let args = (try? JSONSerialization.jsonObject(with: Data(e.args.utf8)) as? [String: Any]) ?? [:]
+                calls.append(ToolCall(id: e.id.isEmpty ? UUID().uuidString : e.id, name: e.name, arguments: args))
+            }
+            if !calls.isEmpty { return .toolCalls(calls) }
+        }
+        guard !fullText.isEmpty else { throw LLMError.emptyResponse }
+        return .text(fullText)
+    }
+
+    private func anthropicChatStream(model: AIModelConfig, messages: [ChatMessage], tools: [[String: Any]]?, onDelta: (String) async -> Void) async throws -> LLMReply {
+        let endpoint = try endpointURL(model, apiType: .anthropic)
+        var body = try anthropicRequestBody(model: model, messages: messages, tools: tools)
+        body["stream"] = true
+
+        let request = try makePostRequest(endpoint: endpoint, body: body, model: model)
+        let stream: URLSession.AsyncBytes
+        let response: URLResponse
+        do {
+            (stream, response) = try await session.bytes(for: request)
+        } catch {
+            throw LLMError.network(error)
+        }
+        try await checkStreamStatus(response, stream: stream)
+
+        /// index -> (type, id, name, text, inputJSON)
+        var blocks: [Int: (type: String, id: String, name: String, text: String, json: String)] = [:]
+
+        do {
+            for try await line in stream.lines {
+                if Task.isCancelled { throw CancellationError() }
+                guard line.hasPrefix("data:") else { continue }
+                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                guard let json = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] else { continue }
+                switch json["type"] as? String {
+                case "content_block_start":
+                    if let index = (json["index"] as? NSNumber)?.intValue,
+                       let block = json["content_block"] as? [String: Any],
+                       let type = block["type"] as? String {
+                        blocks[index] = (type, block["id"] as? String ?? "", block["name"] as? String ?? "", "", "")
+                    }
+                case "content_block_delta":
+                    if let index = (json["index"] as? NSNumber)?.intValue,
+                       var block = blocks[index],
+                       let delta = json["delta"] as? [String: Any] {
+                        switch delta["type"] as? String {
+                        case "text_delta":
+                            if let t = delta["text"] as? String {
+                                block.text += t
+                                blocks[index] = block
+                                await onDelta(t)
+                            }
+                        case "input_json_delta":
+                            if let j = delta["partial_json"] as? String {
+                                block.json += j
+                                blocks[index] = block
+                            }
+                        default:
+                            break
+                        }
+                    }
+                case "error":
+                    let msg = (json["error"] as? [String: Any])?["message"] as? String ?? "stream error"
+                    throw LLMError.badStatus(500, msg)
+                default:
+                    break
+                }
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let e as LLMError {
+            throw e
+        } catch {
+            throw LLMError.network(error)
+        }
+
+        var calls: [ToolCall] = []
+        var textParts: [String] = []
+        for key in blocks.keys.sorted() {
+            guard let b = blocks[key] else { continue }
+            if b.type == "text" {
+                textParts.append(b.text)
+            } else if b.type == "tool_use" {
+                let args = (try? JSONSerialization.jsonObject(with: Data(b.json.utf8)) as? [String: Any]) ?? [:]
+                calls.append(ToolCall(id: b.id, name: b.name, arguments: args))
+            }
+        }
+        if !calls.isEmpty { return .toolCalls(calls) }
+        let text = textParts.joined(separator: "\n")
+        guard !text.isEmpty else { throw LLMError.emptyResponse }
+        return .text(text)
+    }
+
+    /// 流式响应状态码检查；非 2xx 时读完错误体后抛出
+    private func checkStreamStatus(_ response: URLResponse, stream: URLSession.AsyncBytes) async throws {
+        guard let http = response as? HTTPURLResponse else {
+            throw LLMError.network(URLError(.badServerResponse))
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            var data = Data()
+            do {
+                for try await b in stream { data.append(b) }
+            } catch {
+                // 错误体读取失败不影响错误抛出
+            }
+            if http.statusCode == 429 { throw LLMError.rateLimited }
+            if http.statusCode == 529 { throw LLMError.serverOverloaded }
+            let msg = String(data: data, encoding: .utf8) ?? ""
+            throw LLMError.badStatus(http.statusCode, String(msg.prefix(500)))
+        }
+    }
+
     // MARK: - OpenAI 兼容协议
 
     private func openAIChat(model: AIModelConfig, messages: [ChatMessage], tools: [[String: Any]]? = nil) async throws -> LLMReply {
@@ -548,10 +750,22 @@ final class LLMClient {
                     let delay = baseRetryDelay * UInt64(1 << attempt)
                     let delayMs = delay / 1_000_000
                     RuntimeLogger.shared.warning("LLM", "遇到可重试错误 (\(error))，第 \(attempt + 1) 次等待 \(delayMs)ms 后重试")
-                    try? await Task.sleep(nanoseconds: delay)
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        // 非 cancellation 的 sleep 失败继续重试
+                    }
                 case .badStatus(let code, _) where code >= 500:
                     let delay = baseRetryDelay * UInt64(1 << attempt)
-                    try? await Task.sleep(nanoseconds: delay)
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        // 非 cancellation 的 sleep 失败继续重试
+                    }
                 default:
                     throw error
                 }
@@ -559,7 +773,13 @@ final class LLMClient {
                 lastError = error
                 if attempt < maxRetryCount - 1 {
                     let delay = baseRetryDelay * UInt64(1 << attempt)
-                    try? await Task.sleep(nanoseconds: delay)
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    } catch {
+                        // 非 cancellation 的 sleep 失败继续重试
+                    }
                 }
             }
         }
@@ -576,6 +796,13 @@ final class LLMClient {
             trimmed.content = String(msg.content.prefix(maxToolResultChars))
                 + "\n…[截断，原始 \(msg.content.count) 字符]"
             return trimmed
+        }
+
+        // 1.5 仅保留最后一条带图用户消息的图片附件，避免多轮图片撑爆上下文
+        if let lastImageIdx = processed.lastIndex(where: { $0.role == .user && $0.imageData != nil }) {
+            for i in processed.indices where i != lastImageIdx {
+                processed[i].imageData = nil
+            }
         }
 
         // 2. 估算总字符，若超限则裁剪中段（保留 system + 头部少量 + 尾部大量）
@@ -606,9 +833,22 @@ final class LLMClient {
 
     private func openAIMessageDict(_ message: ChatMessage) -> [String: Any] {
         var dict: [String: Any] = [
-            "role": roleName(message.role),
-            "content": message.content
+            "role": roleName(message.role)
         ]
+        // 多模态：用户消息携带图片时使用 content parts（data URI）
+        if message.role == .user, let imageData = message.imageData {
+            var parts: [[String: Any]] = []
+            if !message.content.isEmpty {
+                parts.append(["type": "text", "text": message.content])
+            }
+            parts.append([
+                "type": "image_url",
+                "image_url": ["url": "data:image/jpeg;base64,\(imageData.base64EncodedString())"]
+            ])
+            dict["content"] = parts
+        } else {
+            dict["content"] = message.content
+        }
         if message.role == .tool, let id = message.toolCallID {
             dict["tool_call_id"] = id
             if let name = message.name {

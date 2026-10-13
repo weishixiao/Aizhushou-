@@ -62,6 +62,8 @@ final class CodingAgent: ObservableObject {
     private var repeatedToolCount = 0
     /// 各工具在本轮任务中的连续失败次数（按工具名维度，成功清零）
     private var toolFailCounts: [String: Int] = [:]
+    /// 随下一条用户消息发送的图片附件
+    private var pendingImageData: Data?
     private let pendingTaskFileName = "pending_task.json"
 
     init(workspace: WorkspaceManager) {
@@ -73,11 +75,9 @@ final class CodingAgent: ObservableObject {
         registry.register(GitBranchTool())
         registry.register(GitLogTool())
         registry.register(RepoOverviewTool())
-        registry.register(ReadFileTool())        // 工作区内读取
-        registry.register(WriteFileTool())       // 工作区内写入
-        // 强力工具（覆盖同名工具）
-        registry.register(UnrestrictedReadFileTool())  // 覆盖 ReadFileTool，支持绝对路径
-        registry.register(UnrestrictedWriteFileTool()) // 覆盖 WriteFileTool，支持绝对路径
+        // 强力工具（支持绝对路径，覆盖工作区限制版本）
+        registry.register(UnrestrictedReadFileTool())
+        registry.register(UnrestrictedWriteFileTool())
 
         // 系统工具
         registry.register(ShellExecuteTool())
@@ -85,12 +85,41 @@ final class CodingAgent: ObservableObject {
         registry.register(GitCommitTool())
         restoreConversation()
         restorePendingTask()
+        // MCP 远程工具异步加载，不阻塞启动
+        Task { @MainActor [weak self] in
+            await self?.loadMCPTools()
+        }
+    }
+
+    /// 连接已启用的 MCP Server（Streamable HTTP / SSE），把远程工具注册进工具表
+    @MainActor
+    private func loadMCPTools() async {
+        let servers = MCPServerStore().servers.filter { $0.enabled }
+        guard !servers.isEmpty else { return }
+        for server in servers {
+            let client = MCPClient(server: server)
+            guard client.isSupported else {
+                RuntimeLogger.shared.warning("MCP[\(server.name)]", "跳过：iOS 无法运行本地 stdio 进程，仅支持 HTTP 传输")
+                continue
+            }
+            do {
+                try await client.initialize()
+                let defs = try await client.listTools()
+                for def in defs {
+                    registry.register(MCPProxyTool(server: server, def: def))
+                }
+                RuntimeLogger.shared.info("MCP[\(server.name)]", "已加载 \(defs.count) 个远程工具")
+            } catch {
+                RuntimeLogger.shared.error("MCP[\(server.name)]", "连接失败：\(error.localizedDescription)")
+            }
+        }
     }
 
     /// 发送用户消息并驱动工具调用循环
-    func send(_ userText: String, model: AIModelConfig) async {
+    func send(_ userText: String, model: AIModelConfig, imageData: Data? = nil) async {
         let text = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isWorking else { return }
+        pendingImageData = imageData
         await runConversation(model: model, userText: text, appendUserMessage: true)
     }
 
@@ -218,13 +247,20 @@ final class CodingAgent: ObservableObject {
                     finalText = content
                     await MainActor.run {
                         updateStage("整理回复内容", model: model, prompt: userText)
+                        streamingText = nil
                         messages.append(ChatMessage(role: .assistant, content: content))
                         saveConversation()
                         clearPendingTaskState()
                     }
                     break toolLoop
                 case .toolCalls(let calls):
-                    let assistantMsg = ChatMessage(role: .assistant, content: "", assistantToolCalls: calls)
+                    // 保留本轮已流式输出的文本，与工具调用一起进入历史
+                    var streamedContent = ""
+                    await MainActor.run {
+                        streamedContent = streamingText ?? ""
+                        streamingText = nil
+                    }
+                    let assistantMsg = ChatMessage(role: .assistant, content: streamedContent, assistantToolCalls: calls)
                     history.append(assistantMsg)
 
                     // 检测连续重复调用同一工具（防 agent 死循环）
@@ -318,6 +354,7 @@ final class CodingAgent: ObservableObject {
                 RuntimeLogger.shared.error("LLM", "请求失败：\(error.localizedDescription)")
                 await MainActor.run {
                     errorMessage = error.localizedDescription
+                    streamingText = nil
                     updateStage("请求失败", model: model, prompt: userText)
                 }
             }
@@ -468,17 +505,33 @@ final class CodingAgent: ObservableObject {
         return String(s.prefix(limit)) + "\n...[已截断]"
     }
 
-    /// 发送一次聊天请求，遇到 429 速率限制时指数退避重试
+    /// 发送一次流式聊天请求：增量文本实时回调到 streamingText；
+    /// 429 退避重试；部分服务不支持 stream 时自动回退非流式
     private func chatWithRetry(model: AIModelConfig, messages: [ChatMessage], tools: [[String: Any]], userText: String) async throws -> LLMReply {
         let maxRetries = 3
         for attempt in 0...maxRetries {
             do {
+                await MainActor.run {
+                    streamingText = nil
+                }
+                return try await client.chatStream(model: model, messages: messages, tools: tools, onDelta: { [weak self] chunk in
+                    await MainActor.run {
+                        self?.appendStreamDelta(chunk)
+                    }
+                })
+            } catch LLMError.badStatus(let code, _) where code == 400 || code == 404 || code == 422 || code == 501 {
+                // 部分兼容服务不支持 stream:true —— 回退非流式重发
+                RuntimeLogger.shared.warning("LLM", "流式请求失败(\(code))，回退到非流式模式")
+                await MainActor.run {
+                    streamingText = nil
+                }
                 return try await client.chat(model: model, messages: messages, tools: tools)
             } catch LLMError.rateLimited {
                 if attempt == maxRetries || isCancelled { throw LLMError.rateLimited }
                 let delay = 2 * pow(2, Double(attempt)) // 2, 4, 8 秒
                 let seconds = Int(delay)
                 await MainActor.run {
+                    streamingText = nil
                     updateStage("请求过于频繁（429），等待 \(seconds) 秒后自动重试", model: model, prompt: userText)
                 }
                 RuntimeLogger.shared.warning("LLM", "429 速率限制，第 \(attempt + 1) 次重试等待 \(seconds) 秒")
@@ -487,6 +540,13 @@ final class CodingAgent: ObservableObject {
             }
         }
         throw LLMError.rateLimited
+    }
+
+    /// 流式增量追加（主线程调用）
+    @MainActor
+    private func appendStreamDelta(_ chunk: String) {
+        if streamingText == nil { streamingText = "" }
+        streamingText?.append(chunk)
     }
 
     /// 生成工具调用的签名（工具名 + 排序后的参数键值），用于检测连续重复调用

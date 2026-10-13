@@ -98,6 +98,7 @@ final class ModelStore: ObservableObject {
 
     func remove(_ model: AIModelConfig) {
         models.removeAll { $0.id == model.id }
+        KeychainStore.shared.delete(Self.keychainAccount(for: model.id))
         if selectedID == model.id {
             selectedID = models.first?.id
         }
@@ -107,7 +108,21 @@ final class ModelStore: ObservableObject {
     private func load() {
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode([AIModelConfig].self, from: data) {
-            models = decoded
+            // 迁移：旧版本 apiKey 明文存 UserDefaults —— 读出后转入 Keychain 并立即落盘脱敏版本
+            var migrated = false
+            models = decoded.map { m in
+                var model = m
+                let account = Self.keychainAccount(for: model.id)
+                if !model.apiKey.isEmpty {
+                    KeychainStore.shared.write(model.apiKey, account: account)
+                    model.apiKey = ""
+                    migrated = true
+                } else if let stored = KeychainStore.shared.read(account) {
+                    model.apiKey = stored
+                }
+                return model
+            }
+            if migrated { persistModels() }
         }
         if let idData = UserDefaults.standard.data(forKey: selectedKey),
            let id = try? JSONDecoder().decode(UUID.self, from: idData) {
@@ -116,11 +131,33 @@ final class ModelStore: ObservableObject {
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(models) {
+        // apiKey 只入 Keychain，UserDefaults 中仅保留脱敏后的配置
+        for model in models {
+            let account = Self.keychainAccount(for: model.id)
+            if model.apiKey.isEmpty {
+                KeychainStore.shared.delete(account)
+            } else {
+                KeychainStore.shared.write(model.apiKey, account: account)
+            }
+        }
+        persistModels()
+    }
+
+    private func persistModels() {
+        let sanitized = models.map { m -> AIModelConfig in
+            var copy = m
+            copy.apiKey = ""
+            return copy
+        }
+        if let data = try? JSONEncoder().encode(sanitized) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
         if let id = selectedID, let idData = try? JSONEncoder().encode(id) {
             UserDefaults.standard.set(idData, forKey: selectedKey)
         }
+    }
+
+    private static func keychainAccount(for id: UUID) -> String {
+        "model.apikey.\(id.uuidString)"
     }
 }

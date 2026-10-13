@@ -25,6 +25,8 @@ struct CodingChatView: View {
 
     @State private var showPhotoPicker = false
     @State private var hasPhotoAttachment = false
+    /// 随下一条消息发送的图片（已压缩）
+    @State private var pendingImageData: Data?
     @State private var showProcessSheet = false
 
     @State private var targetApp: InstalledApp?
@@ -222,6 +224,15 @@ struct CodingChatView: View {
                 .padding(.horizontal, 12)
             }
 
+            // 待发送图片徽标
+            if hasPhotoAttachment {
+                HStack {
+                    photoAttachmentBadge
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+            }
+
             HStack(alignment: .bottom, spacing: 10) {
                 // 浮动胶囊输入框
                 capsuleInputField
@@ -306,6 +317,33 @@ struct CodingChatView: View {
             // 删除按钮
             Button {
                 targetApp = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(textSecondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundColor(accent)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(accent.opacity(0.12))
+        .clipShape(Capsule())
+        .padding(.bottom, 6)
+    }
+
+    // MARK: - 待发送图片徽标
+
+    private var photoAttachmentBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "photo.fill")
+                .font(.system(size: 11))
+            Text("图片将随下一条消息发送")
+                .font(.caption2)
+                .lineLimit(1)
+            Button {
+                pendingImageData = nil
+                hasPhotoAttachment = false
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 12))
@@ -612,12 +650,15 @@ struct CodingChatView: View {
             版本：\(app.version)
             """
         }
+        let image = pendingImageData
+        pendingImageData = nil
+        hasPhotoAttachment = false
         sendTask = Task { @MainActor in
             guard let model = modelStore.selectedModel else {
                 agent.errorMessage = "请先添加并选择模型"
                 return
             }
-            await agent.send(prompt, model: model)
+            await agent.send(prompt, model: model, imageData: image)
             sendTask = nil
         }
     }

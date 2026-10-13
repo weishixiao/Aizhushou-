@@ -149,9 +149,9 @@
   <h2>安装与配置</h2>
   <ul class="tight">
     <li>用 TrollStore 打开并安装生成的 <code>.ipa</code>（越狱环境也可用其他方式安装）。</li>
-    <li>首次使用：在「模型设置」添加模型（Base URL / API Key / 模型名）。</li>
-    <li>「分析」选择目标文件 → 切到「AI 对话」开始提问。</li>
-    <li>需要注入 / 修改系统级文件时：按引导配置 root 权限（NewTerm 中 <code>su root</code> 启动 <code>/var/mobile/root_service</code>，或配置 LaunchDaemon 以 root 运行）。</li>
+    <li>首次使用：在「模型设置」添加模型（Base URL / API Key / 模型名），API Key 自动存入 Keychain。</li>
+    <li>在仓库管理中导入本地目录，或填写 GitHub / Gitee 仓库与 Token 拉取远程代码。</li>
+    <li>「AI 对话」直接下达任务：改代码、跑命令、提交推送……「允许 AI 修改并提交」开关按需打开。</li>
   </ul>
 
   <h2>项目结构</h2>
@@ -159,18 +159,17 @@
 AIReverse/
 ├── AIReverseApp.swift       # App 入口
 ├── Models/                  # 模型配置 / 聊天 / MCP 配置
-├── Services/                # 核心引擎
-│   ├── MachOParser.swift        # Mach-O 解析
-│   ├── ObjCParser.swift         # ObjC 元数据解析
-│   ├── ARM64Disassembler.swift  # ARM64 反汇编
-│   ├── MachOEditor.swift        # 纯 Swift LC_LOAD_DYLIB 注入
-│   ├── InjectionManager.swift   # dylib 注入编排（ldid / su / RootService）
-│   ├── CodingAgent.swift        # 工具调用编码助手
-│   ├── LLMClient.swift          # OpenAI 兼容聊天客户端
-│   ├── GitHubAPIClient.swift    # 仓库管理
-│   └── ...                      # 安装应用扫描 / deb / 日志 / 工作区等
-├── RootService/             # root 守护进程（C 源码，build.sh 编译）
-└── Views/                   # 聊天 / 分析 / 设置 / 日志界面
+├── Services/
+│   ├── LLMClient.swift          # OpenAI / Anthropic 双协议 + 流式 SSE
+│   ├── CodingAgent.swift        # 工具调用循环编排
+│   ├── CodingTool.swift         # 工具协议 / 注册表 / 仓库配置
+│   ├── AppTool.swift            # shell / 任意读写 / grep / http
+│   ├── MCPClient.swift          # MCP Streamable HTTP / SSE 客户端
+│   ├── GitHubAPIClient.swift    # GitHub / Gitee REST API
+│   ├── WorkspaceManager.swift   # 工作区管理（防路径逃逸）
+│   ├── KeychainStore.swift      # Keychain 凭证存储
+│   └── ...                      # 包扫描 / 应用管理 / 日志等
+└── Views/                   # 聊天 / 设置 / 仓库管理等界面
 build_ipa.sh                 # 一键构建打包脚本
 .github/workflows/build-ipa.yml</code></pre>
 
@@ -184,7 +183,7 @@ build_ipa.sh                 # 一键构建打包脚本
 
   <footer>
     <span>AI逆向助手 · AIReverse</span>
-    <span>SwiftUI · 纯本地静态分析 · OpenAI 兼容</span>
+    <span>SwiftUI · AI 编码与逆向 · OpenAI / Anthropic · MIT</span>
   </footer>
 </main>
 </body>

@@ -1,38 +1,5 @@
 import Foundation
 
-/// 写文件工具（修改类，需开启「允许修改」）
-final class WriteFileTool: CodingTool {
-    var name: String { "write_file" }
-    var description: String { "将内容写入工作区指定文件（覆盖已有内容）。写入前自动备份原文件到 .ai_backup/。属于修改类操作。" }
-    var isMutating: Bool { true }
-
-    var parameters: [String: Any] {
-        [
-            "type": "object",
-            "properties": [
-                "path": ["type": "string", "description": "文件相对路径"],
-                "content": ["type": "string", "description": "要写入的完整文件内容"]
-            ],
-            "required": ["path", "content"]
-        ]
-    }
-
-    func execute(arguments: [String: Any], workspace: WorkspaceManager, github: GitHubAPIClient, repoConfig: GitRepoConfig) async throws -> ToolResult {
-        guard let path = ToolArgs.string(arguments, "path") else {
-            return ToolResult(success: false, output: "缺少 path 参数")
-        }
-        guard let content = ToolArgs.string(arguments, "content") else {
-            return ToolResult(success: false, output: "缺少 content 参数")
-        }
-        do {
-            try workspace.writeText(path, content: content)
-            return ToolResult(success: true, output: "已写入 \(path)（\(content.count) 字符）")
-        } catch {
-            return ToolResult(success: false, output: "写入失败：\(error.localizedDescription)")
-        }
-    }
-}
-
 /// Git 提交工具（修改类，需开启「允许修改」）
 /// 通过 GitHub Git Data API 顺序执行 blob -> tree -> commit -> ref。
 final class GitCommitTool: CodingTool {

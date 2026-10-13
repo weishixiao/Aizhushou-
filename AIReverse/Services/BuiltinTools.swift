@@ -1,43 +1,5 @@
 import Foundation
 
-/// 读取文件工具（只读）
-final class ReadFileTool: CodingTool {
-    var name: String { "read_file" }
-    var description: String { "读取工作区内文本文件内容。可指定 start_line 与 end_line 读取部分内容。" }
-    var isMutating: Bool { false }
-
-    var parameters: [String: Any] {
-        [
-            "type": "object",
-            "properties": [
-                "path": ["type": "string", "description": "文件相对路径，如 Sources/main.swift"],
-                "start_line": ["type": "integer", "description": "起始行（可选，从 1 开始）"],
-                "end_line": ["type": "integer", "description": "结束行（可选）"]
-            ],
-            "required": ["path"]
-        ]
-    }
-
-    func execute(arguments: [String: Any], workspace: WorkspaceManager, github: GitHubAPIClient, repoConfig: GitRepoConfig) async throws -> ToolResult {
-        guard let path = ToolArgs.string(arguments, "path") else {
-            return ToolResult(success: false, output: "缺少 path 参数")
-        }
-        let start = ToolArgs.int(arguments, "start_line")
-        let end = ToolArgs.int(arguments, "end_line")
-        do {
-            let content: String
-            if let s = start, let e = end {
-                content = try workspace.readText(path, startLine: s, endLine: e)
-            } else {
-                content = try workspace.readText(path)
-            }
-            return ToolResult(success: true, output: "=== \(path) ===\n\(content)")
-        } catch {
-            return ToolResult(success: false, output: "读取失败：\(error.localizedDescription)")
-        }
-    }
-}
-
 /// 列目录工具（只读）
 final class ListDirTool: CodingTool {
     var name: String { "list_dir" }

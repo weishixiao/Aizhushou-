@@ -123,9 +123,8 @@ final class RuntimeLogger: ObservableObject {
     // MARK: - 脱敏
 
     private static let sensitivePatterns: [(NSRegularExpression, String)] = {
-        func regex(_ p: String) -> NSRegularExpression {
-            // swiftlint:disable:next force_try
-            try! NSRegularExpression(pattern: p, options: [.caseInsensitive])
+        func regex(_ p: String) -> NSRegularExpression? {
+            try? NSRegularExpression(pattern: p, options: [.caseInsensitive])
         }
         return [
             // Bearer <token>
@@ -143,6 +142,10 @@ final class RuntimeLogger: ObservableObject {
             // 长 hex 形态（可能是 key）
             (regex(#"\b[0-9a-f]{32,64}\b""#), "***"),
         ]
+        .compactMap { pair -> (NSRegularExpression, String)? in
+            guard let pattern = pair.0 else { return nil }
+            return (pattern, pair.1)
+        }
     }()
 
     /// 对日志文本做脱敏；空串或长度过大直接原样短路，避免无谓开销。
