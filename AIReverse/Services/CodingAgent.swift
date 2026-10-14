@@ -179,6 +179,13 @@ final class CodingAgent: ObservableObject {
         saveConversation()
     }
 
+    /// 删除指定消息（含关联的工具卡片）
+    @MainActor
+    func deleteMessage(id: UUID) {
+        messages.removeAll { $0.id == id }
+        saveConversation()
+    }
+
     func setPackageScanSummary(_ summary: String?) {
         packageScanSummary = summary
     }

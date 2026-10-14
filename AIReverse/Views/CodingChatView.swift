@@ -24,6 +24,7 @@ struct CodingChatView: View {
     @State private var sendTask: Task<Void, Never>?
 
     @State private var showPhotoPicker = false
+    @State private var showSlashMenu = false
     @State private var hasPhotoAttachment = false
     /// 随下一条消息发送的图片（已压缩）
     @State private var pendingImageData: Data?
@@ -177,6 +178,12 @@ struct CodingChatView: View {
                 handlePhotoPicked(images)
             }
         }
+        .sheet(isPresented: $showSlashMenu) {
+            SlashMenuView { command in
+                showSlashMenu = false
+                applySlashCommand(command)
+            }
+        }
         .onAppear {
             if agent.messages.isEmpty { seedWelcome() }
         }
@@ -213,8 +220,10 @@ struct CodingChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(Array(agent.messages.enumerated()), id: \.element.id) { index, msg in
-                        BubbleMessageRow(message: msg)
-                            .id(msg.id)
+                        BubbleMessageRow(message: msg) {
+                            agent.deleteMessage(id: msg.id)
+                        }
+                        .id(msg.id)
                     }
                     // 流式输出中的回复（逐字增长）
                     if let streaming = agent.streamingText {
@@ -254,8 +263,18 @@ struct CodingChatView: View {
                     .foregroundColor(textPrimary)
             }
 
-            // 底部按钮行：左（文件 + 相册），右（发送 / 停止）
+            // 底部按钮行：左（斜杠 + 文件 + 相册），右（发送 / 停止）
             HStack(spacing: 14) {
+                Button {
+                    showSlashMenu = true
+                } label: {
+                    Image(systemName: "slash.circle")
+                        .font(.system(size: 24, weight: .regular))
+                        .foregroundColor(textSecondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(agent.isWorking)
+
                 Button {
                     showUploadPicker = true
                 } label: {
@@ -540,6 +559,17 @@ struct CodingChatView: View {
         }
     }
 
+    private func applySlashCommand(_ command: SlashCommand) {
+        switch command {
+        case .newSession:
+            newSession()
+        case .clearContext:
+            clearContext()
+        case .prompt(let text):
+            inputText = text
+        }
+    }
+
     private func seedWelcome() {
         agent.appendLocalMessage(
             role: .assistant,
@@ -649,6 +679,8 @@ struct CodingChatView: View {
 /// AI 文本无背景直接渲染 Markdown；工具调用内联卡片
 private struct BubbleMessageRow: View {
     let message: ChatMessage
+    var onDelete: (() -> Void)? = nil
+    @ObservedObject private var tts = TTSManager.shared
 
     private let userBubble = Color(red: 0.95, green: 0.95, blue: 0.97)   // 浅灰
     private let surface = Color(red: 0.95, green: 0.95, blue: 0.97)
@@ -688,6 +720,14 @@ private struct BubbleMessageRow: View {
             }
             Button { UIPasteboard.general.string = quotedContent } label: {
                 Label("复制为引用", systemImage: "quote.bubble")
+            }
+            Button { TTSManager.shared.toggle(message.content) } label: {
+                Label(tts.isSpeaking ? "停止朗读" : "朗读", systemImage: tts.isSpeaking ? "stop.circle" : "speaker.wave.2")
+            }
+            if onDelete != nil {
+                Button(role: .destructive) { onDelete?() } label: {
+                    Label("删除此消息", systemImage: "trash")
+                }
             }
         }
     }
@@ -751,6 +791,14 @@ private struct BubbleMessageRow: View {
             }
             .frame(maxWidth: UIScreen.main.bounds.width * 0.85, alignment: .leading)
             Spacer(minLength: 0)
+            Button {
+                TTSManager.shared.toggle(message.content)
+            } label: {
+                Image(systemName: tts.isSpeaking ? "speaker.wave.2.fill" : "speaker.wave.2")
+                    .font(.system(size: 13))
+                    .foregroundColor(tts.isSpeaking ? accent : textTime)
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -893,5 +941,64 @@ fileprivate struct ImageDimension: CustomStringConvertible {
             return ImageDimension(width: Int(img.size.width), height: Int(img.size.height))
         }
         return nil
+    }
+}
+
+// MARK: - 斜杠命令（OpenMinis 风格快捷菜单）
+
+enum SlashCommand: Identifiable {
+    case newSession
+    case clearContext
+    case prompt(String)
+
+    var id: String {
+        switch self {
+        case .newSession: return "new"
+        case .clearContext: return "clear"
+        case .prompt(let t): return "p-\(t)"
+        }
+    }
+}
+
+private struct SlashMenuView: View {
+    let onSelect: (SlashCommand) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    private let promptTemplates: [(String, String)] = [
+        ("review", "审查这段代码的问题与优化点"),
+        ("explain", "解释这段代码的作用"),
+        ("fix", "修复以下报错"),
+        ("test", "为这段代码编写测试"),
+        ("optimize", "优化这段代码的性能与可读性"),
+        ("translate", "翻译为中文"),
+    ]
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section("会话") {
+                    Button { onSelect(.newSession) } label: {
+                        Label("新会话", systemImage: "square.and.pencil")
+                    }
+                    Button { onSelect(.clearContext) } label: {
+                        Label("清空上下文", systemImage: "trash")
+                    }
+                }
+                Section("提示词模板") {
+                    ForEach(promptTemplates, id: \.0) { icon, text in
+                        Button { onSelect(.prompt(text)) } label: {
+                            Label(text, systemImage: icon)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("快捷命令")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("关闭") { dismiss() }
+                }
+            }
+        }
     }
 }
