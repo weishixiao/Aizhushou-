@@ -226,16 +226,8 @@ struct CodingChatView: View {
                     ForEach(Array(agent.messages.enumerated()), id: \.element.id) { index, msg in
                         BubbleMessageRow(
                             message: msg,
-                            onDelete: {
-                                agent.deleteMessage(id: msg.id)
-                            },
-                            onRegenerate: msg.role == .assistant ? {
-                                Task { @MainActor in
-                                    if let model = modelStore.selectedModel {
-                                        await agent.regenerateLast(model: model)
-                                    }
-                                }
-                            } : nil
+                            onDelete: { agent.deleteMessage(id: msg.id) },
+                            onRegenerate: msg.role == .assistant ? { regenerate() } : nil
                         )
                         .id(msg.id)
                     }
@@ -587,6 +579,13 @@ struct CodingChatView: View {
             }
             await agent.send(prompt, model: model, imageData: image)
             sendTask = nil
+        }
+    }
+
+    private func regenerate() {
+        guard let model = modelStore.selectedModel else { return }
+        Task { @MainActor in
+            await agent.regenerateLast(model: model)
         }
     }
 
