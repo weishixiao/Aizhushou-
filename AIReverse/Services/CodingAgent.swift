@@ -214,7 +214,9 @@ final class CodingAgent: ObservableObject {
             isWorking = true
             errorMessage = nil
             if appendUserMessage {
-                messages.append(ChatMessage(role: .user, content: userText))
+                let image = pendingImageData
+                pendingImageData = nil
+                messages.append(ChatMessage(role: .user, content: userText, imageData: image))
                 stageHistory.removeAll()
                 updateStage("准备发送请求", model: model, prompt: userText)
                 saveConversation()

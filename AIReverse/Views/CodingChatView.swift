@@ -14,6 +14,7 @@ struct CodingChatView: View {
     @EnvironmentObject var modelStore: ModelStore
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var agent: CodingAgent
+    @ObservedObject private var speech = SpeechRecognizer.shared
 
     @State private var inputText = ""
     @State private var showModelSettings = false
@@ -186,6 +187,9 @@ struct CodingChatView: View {
         }
         .onAppear {
             if agent.messages.isEmpty { seedWelcome() }
+            speech.onText = { text in
+                inputText = text
+            }
         }
         .onChange(of: scenePhase) { _ in
             // 暂留逻辑原样保留
@@ -220,9 +224,19 @@ struct CodingChatView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(Array(agent.messages.enumerated()), id: \.element.id) { index, msg in
-                        BubbleMessageRow(message: msg) {
-                            agent.deleteMessage(id: msg.id)
-                        }
+                        BubbleMessageRow(
+                            message: msg,
+                            onDelete: {
+                                agent.deleteMessage(id: msg.id)
+                            },
+                            onRegenerate: msg.role == .assistant ? {
+                                Task { @MainActor in
+                                    if let model = modelStore.selectedModel {
+                                        await agent.regenerateLast(model: model)
+                                    }
+                                }
+                            } : nil
+                        )
                         .id(msg.id)
                     }
                     // 流式输出中的回复（逐字增长）
@@ -296,6 +310,23 @@ struct CodingChatView: View {
                 .disabled(agent.isWorking)
 
                 Spacer()
+
+                // 语音输入按钮
+                Button {
+                    if speech.isRecording {
+                        speech.stop()
+                    } else {
+                        if !speech.hasPermission {
+                            speech.requestPermissions()
+                        }
+                        speech.start()
+                    }
+                } label: {
+                    Image(systemName: speech.isRecording ? "mic.fill" : "mic")
+                        .font(.system(size: 24, weight: .regular))
+                        .foregroundColor(speech.isRecording ? .red : textSecondary)
+                }
+                .buttonStyle(.plain)
 
                 actionButton
             }
@@ -680,6 +711,7 @@ struct CodingChatView: View {
 private struct BubbleMessageRow: View {
     let message: ChatMessage
     var onDelete: (() -> Void)? = nil
+    var onRegenerate: (() -> Void)? = nil
     @ObservedObject private var tts = TTSManager.shared
 
     private let userBubble = Color(red: 0.95, green: 0.95, blue: 0.97)   // 浅灰
@@ -723,6 +755,11 @@ private struct BubbleMessageRow: View {
             }
             Button { TTSManager.shared.toggle(message.content) } label: {
                 Label(tts.isSpeaking ? "停止朗读" : "朗读", systemImage: tts.isSpeaking ? "stop.circle" : "speaker.wave.2")
+            }
+            if onRegenerate != nil {
+                Button { onRegenerate?() } label: {
+                    Label("重新生成", systemImage: "arrow.clockwise")
+                }
             }
             if onDelete != nil {
                 Button(role: .destructive) { onDelete?() } label: {
