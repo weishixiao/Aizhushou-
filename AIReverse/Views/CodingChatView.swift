@@ -241,76 +241,59 @@ struct CodingChatView: View {
     // MARK: - 输入区
 
     private var inputBar: some View {
-        VStack(spacing: 4) {
-            HStack(alignment: .bottom, spacing: 10) {
-                // 浮动胶囊输入框
-                capsuleInputField
+        VStack(spacing: 6) {
+            // 多行输入框
+            if #available(iOS 16.0, *) {
+                TextField("发送消息…", text: $inputText, axis: .vertical)
+                    .font(.system(size: 16))
+                    .foregroundColor(textPrimary)
+                    .lineSpacing(2)
+            } else {
+                TextField("发送消息…", text: $inputText)
+                    .font(.system(size: 16))
+                    .foregroundColor(textPrimary)
+            }
 
-                // 发送 / 停止按钮
+            // 底部按钮行：左（文件 + 相册），右（发送 / 停止）
+            HStack(spacing: 14) {
+                Button {
+                    showUploadPicker = true
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .font(.system(size: 24, weight: .regular))
+                        .foregroundColor(textSecondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(agent.isWorking)
+
+                Button {
+                    showPhotoPicker = true
+                } label: {
+                    Image(systemName: "photo")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundColor(hasPhotoAttachment ? accent : textSecondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(agent.isWorking)
+
+                Spacer()
+
                 actionButton
             }
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
+        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 2)
+        .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(background)
-        .overlay(
-            Rectangle()
-                .fill(surfaceElevated)
-                .frame(height: 0.5),
-            alignment: .top
-        )
     }
 
-    private var capsuleInputField: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            // 文件上传按钮
-            Button {
-                showUploadPicker = true
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(textSecondary)
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 8)
-            }
-            .buttonStyle(.plain)
-
-            // 相册按钮（集中在输入框内）
-            Button {
-                showPhotoPicker = true
-            } label: {
-                Image(systemName: "photo")
-                    .font(.system(size: 16, weight: .medium))
-                    .foregroundColor(hasPhotoAttachment ? accent : textSecondary)
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 8)
-            }
-            .buttonStyle(.plain)
-            .disabled(agent.isWorking)
-
-            // 输入框
-            if #available(iOS 16.0, *) {
-                TextField("发送消息…", text: $inputText, axis: .vertical)
-                    .font(.system(size: 15))
-                    .foregroundColor(textPrimary)
-                    .padding(.vertical, 10)
-            } else {
-                TextField("发送消息…", text: $inputText)
-                    .font(.system(size: 15))
-                    .foregroundColor(textPrimary)
-                    .padding(.vertical, 10)
-            }
-
-        }
-        .padding(.horizontal, 14)
-        .background(surfaceElevated)
-        .clipShape(Capsule())
-        .overlay(
-            Capsule()
-                .stroke(inputText.isEmpty ? cardBorder : accent.opacity(0.4), lineWidth: 1)
-        )
-    }
-
-    // MARK: - 发送按钮
+    // MARK: - 发送按钮（OpenMinis 风格 34pt 圆形图标）
 
     private var actionButton: some View {
         Button {
@@ -323,13 +306,8 @@ struct CodingChatView: View {
             }
         } label: {
             Image(systemName: inputButtonIcon)
-                .font(.system(size: 16, weight: .bold))
-                .foregroundColor(inputButtonDisabled ? textSecondary.opacity(0.4) : .white)
-                .frame(width: 38, height: 38)
-                .background(
-                    Circle()
-                        .fill(inputButtonEnabled ? accent : surfaceElevated)
-                )
+                .font(.system(size: 34))
+                .foregroundStyle(agent.isWorking ? Color.red : sendButtonColor)
         }
         .buttonStyle(.plain)
         .disabled(inputButtonDisabled)
@@ -481,16 +459,15 @@ struct CodingChatView: View {
     // MARK: - Actions
 
     private var sendButtonColor: Color {
-        if agent.isWorking { return .red }
         if canResumeFromInputButton { return accent }
         if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return Color(.systemGray4) }
-        return accent
+        return Color(.systemGreen)
     }
 
     private var inputButtonIcon: String {
-        if agent.isWorking { return "stop.fill" }
-        if canResumeFromInputButton { return "arrow.clockwise" }
-        return "arrow.up"
+        if agent.isWorking { return "stop.circle.fill" }
+        if canResumeFromInputButton { return "arrow.clockwise.circle.fill" }
+        return "arrow.up.circle.fill"
     }
 
     private var canResumeFromInputButton: Bool {
