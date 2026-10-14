@@ -125,6 +125,18 @@ final class CodingAgent: ObservableObject {
         await runConversation(model: model, userText: text, appendUserMessage: true)
     }
 
+    /// 重新生成最后一条回复：回退到最后一条用户消息并重新发送
+    @MainActor
+    func regenerateLast(model: AIModelConfig) async {
+        guard !isWorking else { return }
+        guard let lastUserIndex = messages.lastIndex(where: { $0.role == .user }) else { return }
+        let userMsg = messages[lastUserIndex]
+        messages.removeSubrange(lastUserIndex...)
+        toolCards.removeAll()
+        saveConversation()
+        await send(userMsg.content, model: model, imageData: userMsg.imageData)
+    }
+
     /// 把指定指令文本直接发进会话（供「进程」入口将目标应用 + 破解指令推送给 AI）
     func sendPrompt(_ prompt: String, model: AIModelConfig) async {
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
